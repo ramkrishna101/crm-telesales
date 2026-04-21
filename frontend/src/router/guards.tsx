@@ -1,5 +1,7 @@
 import { Navigate, Outlet, useLocation } from 'react-router-dom';
-import { useAuthStore, Role } from '../store/authStore';
+import { useAuthStore } from '../store/authStore';
+import type { Role } from '../store/authStore';
+
 
 // Redirects to /login if not authenticated
 export function ProtectedRoute() {

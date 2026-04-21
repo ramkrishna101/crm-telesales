@@ -1,7 +1,9 @@
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
 
-export type Role = 'admin' | 'supervisor' | 'agent';
+export const ROLES = ['admin', 'supervisor', 'agent'] as const;
+export type Role = (typeof ROLES)[number];
+
 
 export interface AuthUser {
   id: string;
