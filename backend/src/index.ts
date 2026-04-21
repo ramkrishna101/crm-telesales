@@ -7,6 +7,9 @@ import { Server as SocketServer } from 'socket.io';
 import rateLimit from 'express-rate-limit';
 import { errorHandler } from './middleware/errorHandler';
 import authRoutes from './modules/auth/auth.routes';
+import usersRoutes from './modules/users/users.routes';
+import teamsRoutes from './modules/teams/teams.routes';
+import campaignsRoutes from './modules/campaigns/campaigns.routes';
 import { verifyAccessToken } from './lib/jwt';
 import { redis } from './lib/redis';
 
@@ -85,11 +88,12 @@ app.get('/health', async (_req, res) => {
 // ── API Routes ────────────────────────────────────────────────────────
 app.use('/api/auth', authLimiter, authRoutes);
 
-// TODO: mount additional route modules here as they are built
-// app.use('/api/users', authenticate, usersRoutes);
-// app.use('/api/campaigns', authenticate, campaignRoutes);
-// app.use('/api/agent', authenticate, agentRoutes);
-// app.use('/api/analytics', authenticate, analyticsRoutes);
+app.use('/api/users', usersRoutes);
+app.use('/api/teams', teamsRoutes);
+app.use('/api/campaigns', campaignsRoutes);
+// TODO (Task 1.6): app.use('/api/leads', leadsRoutes);
+// TODO (Task 1.8): app.use('/api/agent', agentRoutes);
+// TODO (Task 2.x): app.use('/api/analytics', analyticsRoutes);
 
 // ── 404 Handler ───────────────────────────────────────────────────────
 app.use((_req, res) => {
