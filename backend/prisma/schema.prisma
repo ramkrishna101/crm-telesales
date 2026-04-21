@@ -1,0 +1,229 @@
+// This is your Prisma schema file
+// Learn more: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ── Enums ────────────────────────────────────────────────────────────
+
+enum Role {
+  admin
+  supervisor
+  agent
+}
+
+enum UserStatus {
+  active
+  inactive
+  on_break
+}
+
+enum CampaignType {
+  standard
+  vip
+}
+
+enum CampaignStatus {
+  active
+  paused
+  closed
+}
+
+enum Priority {
+  normal
+  high
+}
+
+enum LeadStatus {
+  uncontacted
+  contacted
+  lead
+  not_interested
+  dnd
+  invalid
+  callback
+}
+
+enum FollowUpStatus {
+  pending
+  done
+  missed
+  rescheduled
+}
+
+// ── Models ───────────────────────────────────────────────────────────
+
+model Team {
+  id           String   @id @default(uuid())
+  name         String
+  supervisor   User?    @relation("TeamSupervisor", fields: [supervisorId], references: [id])
+  supervisorId String?
+  createdAt    DateTime @default(now())
+
+  members    User[]       @relation("TeamMembers")
+  campaigns  Campaign[]
+
+  @@map("teams")
+}
+
+model User {
+  id             String     @id @default(uuid())
+  name           String
+  email          String     @unique
+  passwordHash   String
+  role           Role
+  team           Team?      @relation("TeamMembers", fields: [teamId], references: [id])
+  teamId         String?
+  status         UserStatus @default(active)
+  breakStartedAt DateTime?
+  createdAt      DateTime   @default(now())
+  updatedAt      DateTime   @updatedAt
+
+  // Supervisor back-ref
+  supervisorOfTeam Team[] @relation("TeamSupervisor")
+
+  // Relations
+  createdCampaigns  Campaign[]        @relation("CampaignCreator")
+  campaignAccess    CampaignAgent[]
+  assignedLeads     Lead[]            @relation("LeadAssignee")
+  callLogs          CallLog[]
+  followUps         FollowUp[]
+  createdTags       DispositionTag[]
+  breakLogs         BreakLog[]
+
+  @@map("users")
+}
+
+model Campaign {
+  id          String         @id @default(uuid())
+  name        String
+  description String?
+  type        CampaignType   @default(standard)
+  status      CampaignStatus @default(active)
+  priority    Priority       @default(normal)
+  script      String?        // Rich-text HTML for call script (Phase 3)
+  createdBy   User           @relation("CampaignCreator", fields: [createdById], references: [id])
+  createdById String
+  team        Team?          @relation(fields: [teamId], references: [id])
+  teamId      String?
+  createdAt   DateTime       @default(now())
+  closedAt    DateTime?
+
+  // Relations
+  agents      CampaignAgent[]
+  leads       Lead[]
+
+  @@map("campaigns")
+}
+
+/// Junction table — controls which agents can access a campaign.
+/// For VIP campaigns this is a whitelist; for standard campaigns
+/// all assigned agents are inserted here on assignment.
+model CampaignAgent {
+  campaign   Campaign @relation(fields: [campaignId], references: [id])
+  campaignId String
+  agent      User     @relation(fields: [agentId], references: [id])
+  agentId    String
+
+  @@id([campaignId, agentId])
+  @@map("campaign_agents")
+}
+
+model Lead {
+  id           String     @id @default(uuid())
+  campaign     Campaign   @relation(fields: [campaignId], references: [id])
+  campaignId   String
+  phone        String     // Stored plain; masking happens at API layer
+  email        String?
+  name         String?
+  customFields Json?      // Extra CSV columns stored as JSONB
+  assignedTo   User?      @relation("LeadAssignee", fields: [assignedToId], references: [id])
+  assignedToId String?    // NULL = unassigned pool
+  status       LeadStatus @default(uncontacted)
+  priority     Priority   @default(normal)
+  isDnd        Boolean    @default(false)
+  createdAt    DateTime   @default(now())
+  lastCalledAt DateTime?
+
+  // Relations
+  callLogs  CallLog[]
+  followUps FollowUp[]
+
+  // Indexes
+  @@index([assignedToId])
+  @@index([campaignId, status])
+  @@index([campaignId, assignedToId])
+  @@map("leads")
+}
+
+model CallLog {
+  id              String   @id @default(uuid())
+  lead            Lead     @relation(fields: [leadId], references: [id])
+  leadId          String
+  agent           User     @relation(fields: [agentId], references: [id])
+  agentId         String
+  dispositionTag  String
+  durationSeconds Int      @default(0)
+  notes           String?
+  telephonyRef    String?  // Provider call ID — populated after telephony integration
+  calledAt        DateTime @default(now())
+
+  @@index([agentId, calledAt])
+  @@index([leadId])
+  @@map("call_logs")
+}
+
+model FollowUp {
+  id          String         @id @default(uuid())
+  lead        Lead           @relation(fields: [leadId], references: [id])
+  leadId      String
+  agent       User           @relation(fields: [agentId], references: [id])
+  agentId     String
+  scheduledAt DateTime
+  status      FollowUpStatus @default(pending)
+  notes       String?
+  createdAt   DateTime       @default(now())
+  completedAt DateTime?
+
+  @@index([agentId, scheduledAt])
+  @@index([scheduledAt, status])
+  @@map("follow_ups")
+}
+
+model DispositionTag {
+  id        String   @id @default(uuid())
+  name      String   @unique
+  colour    String   @default("#6366f1")
+  isSystem  Boolean  @default(false)
+  createdBy User?    @relation(fields: [createdById], references: [id])
+  createdById String?
+  createdAt DateTime @default(now())
+
+  @@map("disposition_tags")
+}
+
+model BreakLog {
+  id        String    @id @default(uuid())
+  agent     User      @relation(fields: [agentId], references: [id])
+  agentId   String
+  startedAt DateTime  @default(now())
+  endedAt   DateTime?
+
+  @@index([agentId, startedAt])
+  @@map("break_logs")
+}
+
+model DndBlocklist {
+  id       String   @id @default(uuid())
+  phone    String   @unique
+  reason   String?
+  addedAt  DateTime @default(now())
+
+  @@map("dnd_blocklist")
+}
