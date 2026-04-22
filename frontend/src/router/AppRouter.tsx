@@ -13,18 +13,21 @@ export default function AppRouter() {
       <Route path="/login" element={<LoginPage />} />
       <Route path="/unauthorized" element={<UnauthorizedPage />} />
 
-      {/* Admin */}
+      {/* Admin routes */}
       <Route element={<RoleRoute allowedRoles={['admin']} />}>
+        <Route path="/admin" element={<AdminDashboard />} />
         <Route path="/admin/*" element={<AdminDashboard />} />
       </Route>
 
-      {/* Supervisor */}
+      {/* Supervisor routes */}
       <Route element={<RoleRoute allowedRoles={['supervisor']} />}>
+        <Route path="/supervisor" element={<SupervisorDashboard />} />
         <Route path="/supervisor/*" element={<SupervisorDashboard />} />
       </Route>
 
-      {/* Agent */}
+      {/* Agent routes */}
       <Route element={<RoleRoute allowedRoles={['agent']} />}>
+        <Route path="/agent" element={<AgentDashboard />} />
         <Route path="/agent/*" element={<AgentDashboard />} />
       </Route>
 
