@@ -11,6 +11,10 @@ import usersRoutes from './modules/users/users.routes';
 import teamsRoutes from './modules/teams/teams.routes';
 import campaignsRoutes from './modules/campaigns/campaigns.routes';
 import leadsRoutes from './modules/leads/leads.routes';
+import callsRoutes from './modules/calls/calls.routes';
+import tagsRoutes from './modules/calls/tags.routes';
+import followUpsRoutes from './modules/follow-ups/followUps.routes';
+import agentRoutes from './modules/agent/agent.routes';
 import { startLeadUploadWorker } from './jobs/leadUpload.worker';
 import { verifyAccessToken } from './lib/jwt';
 import { redis } from './lib/redis';
@@ -94,7 +98,10 @@ app.use('/api/users', usersRoutes);
 app.use('/api/teams', teamsRoutes);
 app.use('/api/campaigns', campaignsRoutes);
 app.use('/api/leads', leadsRoutes);
-// TODO (Task 1.8): app.use('/api/agent', agentRoutes);
+app.use('/api/calls', callsRoutes);
+app.use('/api/tags', tagsRoutes);
+app.use('/api/follow-ups', followUpsRoutes);
+app.use('/api/agent', agentRoutes);
 // TODO (Task 2.x): app.use('/api/analytics', analyticsRoutes);
 
 // ── 404 Handler ───────────────────────────────────────────────────────
