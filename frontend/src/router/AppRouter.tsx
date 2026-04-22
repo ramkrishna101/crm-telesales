@@ -1,10 +1,19 @@
 import { Routes, Route, Navigate } from 'react-router-dom';
 import { ProtectedRoute, RoleRoute } from './guards';
 import LoginPage from '../pages/auth/LoginPage';
-import AdminDashboard from '../pages/admin/AdminDashboard';
-import SupervisorDashboard from '../pages/supervisor/SupervisorDashboard';
-import AgentDashboard from '../pages/agent/AgentDashboard';
 import UnauthorizedPage from '../pages/auth/UnauthorizedPage';
+
+// Admin
+import AdminDashboard from '../pages/admin/AdminDashboard';
+import UsersPage from '../pages/admin/UsersPage';
+import CampaignsPage from '../pages/admin/CampaignsPage';
+import LeadsPage from '../pages/admin/LeadsPage';
+
+// Supervisor
+import SupervisorDashboard from '../pages/supervisor/SupervisorDashboard';
+
+// Agent
+import AgentDashboard from '../pages/agent/AgentDashboard';
 
 export default function AppRouter() {
   return (
@@ -16,6 +25,10 @@ export default function AppRouter() {
       {/* Admin routes */}
       <Route element={<RoleRoute allowedRoles={['admin']} />}>
         <Route path="/admin" element={<AdminDashboard />} />
+        <Route path="/admin/users" element={<UsersPage />} />
+        <Route path="/admin/campaigns" element={<CampaignsPage />} />
+        <Route path="/admin/leads" element={<LeadsPage />} />
+        {/* Fallback: keep showing dashboard for unbuilt sub-pages */}
         <Route path="/admin/*" element={<AdminDashboard />} />
       </Route>
 
@@ -36,7 +49,6 @@ export default function AppRouter() {
         <Route path="/" element={<Navigate to="/login" replace />} />
       </Route>
 
-      {/* 404 */}
       <Route path="*" element={<Navigate to="/login" replace />} />
     </Routes>
   );
