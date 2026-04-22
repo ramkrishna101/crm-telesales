@@ -16,6 +16,7 @@ import tagsRoutes from './modules/calls/tags.routes';
 import followUpsRoutes from './modules/follow-ups/followUps.routes';
 import agentRoutes from './modules/agent/agent.routes';
 import { startLeadUploadWorker } from './jobs/leadUpload.worker';
+import { startFollowUpReminderJob } from './jobs/followUpReminder.job';
 import { verifyAccessToken } from './lib/jwt';
 import { redis } from './lib/redis';
 
@@ -120,6 +121,7 @@ httpServer.listen(PORT, () => {
   console.log(`🌍 Environment: ${process.env.NODE_ENV || 'development'}\n`);
   // Start background workers
   startLeadUploadWorker();
+  startFollowUpReminderJob(io);
 });
 
 export default app;

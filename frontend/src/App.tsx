@@ -2,6 +2,7 @@ import { BrowserRouter } from 'react-router-dom';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { Toaster } from 'react-hot-toast';
 import AppRouter from './router/AppRouter';
+import { useSocket } from './hooks/useSocket';
 import './index.css';
 
 const queryClient = new QueryClient({
@@ -10,10 +11,17 @@ const queryClient = new QueryClient({
   },
 });
 
+// Initialises Socket.io connection once user is authenticated
+function SocketBootstrap() {
+  useSocket();
+  return null;
+}
+
 function App() {
   return (
     <BrowserRouter>
       <QueryClientProvider client={queryClient}>
+        <SocketBootstrap />
         <AppRouter />
         <Toaster
           position="top-right"
