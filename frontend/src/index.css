@@ -1092,3 +1092,31 @@ textarea.form-input { resize: vertical; min-height: 64px; }
   0%, 100% { opacity: 1; transform: scale(1); }
   50% { opacity: 0.6; transform: scale(1.2); }
 }
+
+/* ── Members Panel (Teams page) ──────────────────────────────────────── */
+.members-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.members-panel__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 4px;
+}
+
+/* ── CSS variables not yet defined ───────────────────────────────────── */
+:root {
+  --green: #22c55e;
+  --red: #ef4444;
+  --red-subtle: #450a0a;
+  --shadow-lg: 0 20px 60px rgba(0,0,0,0.5);
+  --radius-xl: 16px;
+  --border-subtle: rgba(255,255,255,0.07);
+  --bg-hover: rgba(255,255,255,0.04);
+  --bg-elevated: rgba(255,255,255,0.03);
+  --accent-subtle: rgba(99,102,241,0.12);
+  --accent-hover: #818cf8;
+}

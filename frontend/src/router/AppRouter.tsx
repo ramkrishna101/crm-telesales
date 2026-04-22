@@ -6,8 +6,10 @@ import UnauthorizedPage from '../pages/auth/UnauthorizedPage';
 // Admin
 import AdminDashboard from '../pages/admin/AdminDashboard';
 import UsersPage from '../pages/admin/UsersPage';
+import TeamsPage from '../pages/admin/TeamsPage';
 import CampaignsPage from '../pages/admin/CampaignsPage';
 import LeadsPage from '../pages/admin/LeadsPage';
+import TagsPage from '../pages/admin/TagsPage';
 import AnalyticsPage from '../pages/admin/AnalyticsPage';
 
 // Supervisor
@@ -23,29 +25,32 @@ export default function AppRouter() {
       <Route path="/login" element={<LoginPage />} />
       <Route path="/unauthorized" element={<UnauthorizedPage />} />
 
-      {/* Admin */}
+      {/* ── Admin ────────────────────────────────────────────────────── */}
       <Route element={<RoleRoute allowedRoles={['admin']} />}>
         <Route path="/admin" element={<AdminDashboard />} />
         <Route path="/admin/users" element={<UsersPage />} />
+        <Route path="/admin/teams" element={<TeamsPage />} />
         <Route path="/admin/campaigns" element={<CampaignsPage />} />
         <Route path="/admin/leads" element={<LeadsPage />} />
+        <Route path="/admin/tags" element={<TagsPage />} />
         <Route path="/admin/analytics" element={<AnalyticsPage />} />
+        {/* Fallback for unbuilt sub-pages */}
         <Route path="/admin/*" element={<AdminDashboard />} />
       </Route>
 
-      {/* Supervisor */}
+      {/* ── Supervisor ───────────────────────────────────────────────── */}
       <Route element={<RoleRoute allowedRoles={['supervisor']} />}>
         <Route path="/supervisor" element={<SupervisorDashboard />} />
         <Route path="/supervisor/*" element={<SupervisorDashboard />} />
       </Route>
 
-      {/* Agent */}
+      {/* ── Agent ────────────────────────────────────────────────────── */}
       <Route element={<RoleRoute allowedRoles={['agent']} />}>
         <Route path="/agent" element={<AgentDashboard />} />
         <Route path="/agent/*" element={<AgentDashboard />} />
       </Route>
 
-      {/* Redirect root based on role handled by guards */}
+      {/* Root redirect */}
       <Route element={<ProtectedRoute />}>
         <Route path="/" element={<Navigate to="/login" replace />} />
       </Route>
