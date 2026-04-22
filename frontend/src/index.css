@@ -1120,3 +1120,36 @@ textarea.form-input { resize: vertical; min-height: 64px; }
   --accent-subtle: rgba(99,102,241,0.12);
   --accent-hover: #818cf8;
 }
+
+/* ── Upload Panel Full (with format guide) ──────────────────────────── */
+.upload-panel-full {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  padding: 24px;
+  margin-bottom: 16px;
+}
+
+.upload-layout {
+  display: grid;
+  grid-template-columns: 380px 1fr;
+  gap: 24px;
+  align-items: flex-start;
+}
+
+@media (max-width: 900px) {
+  .upload-layout { grid-template-columns: 1fr; }
+}
+
+.upload-format-guide {
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-subtle);
+  border-radius: 12px;
+  padding: 18px;
+}
+
+.upload-drop--dragging {
+  border-color: var(--accent) !important;
+  background: var(--accent-subtle) !important;
+  transform: scale(1.01);
+}
