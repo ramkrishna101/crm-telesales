@@ -10,6 +10,8 @@ import authRoutes from './modules/auth/auth.routes';
 import usersRoutes from './modules/users/users.routes';
 import teamsRoutes from './modules/teams/teams.routes';
 import campaignsRoutes from './modules/campaigns/campaigns.routes';
+import leadsRoutes from './modules/leads/leads.routes';
+import { startLeadUploadWorker } from './jobs/leadUpload.worker';
 import { verifyAccessToken } from './lib/jwt';
 import { redis } from './lib/redis';
 
@@ -91,7 +93,7 @@ app.use('/api/auth', authLimiter, authRoutes);
 app.use('/api/users', usersRoutes);
 app.use('/api/teams', teamsRoutes);
 app.use('/api/campaigns', campaignsRoutes);
-// TODO (Task 1.6): app.use('/api/leads', leadsRoutes);
+app.use('/api/leads', leadsRoutes);
 // TODO (Task 1.8): app.use('/api/agent', agentRoutes);
 // TODO (Task 2.x): app.use('/api/analytics', analyticsRoutes);
 
@@ -109,6 +111,8 @@ httpServer.listen(PORT, () => {
   console.log(`\n🚀 CRM Backend running on http://localhost:${PORT}`);
   console.log(`🔌 Socket.io ready`);
   console.log(`🌍 Environment: ${process.env.NODE_ENV || 'development'}\n`);
+  // Start background workers
+  startLeadUploadWorker();
 });
 
 export default app;

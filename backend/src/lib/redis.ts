@@ -1,11 +1,13 @@
 import Redis from 'ioredis';
 
-export const redis = new Redis(process.env.REDIS_URL || 'redis://localhost:6379', {
-  maxRetriesPerRequest: 3,
-  enableReadyCheck: true,
+const REDIS_URL = process.env.REDIS_URL || 'redis://localhost:6379';
+
+// Standard client for general use and BullMQ Queue
+export const redis = new Redis(REDIS_URL, {
+  maxRetriesPerRequest: null, // Required by BullMQ
+  enableReadyCheck: false,
   retryStrategy(times) {
-    const delay = Math.min(times * 50, 2000);
-    return delay;
+    return Math.min(times * 50, 2000);
   },
 });
 
@@ -17,7 +19,7 @@ export async function storeRefreshToken(userId: string, token: string, ttlSecond
   await redis.setex(`refresh:${userId}:${token}`, ttlSeconds, '1');
 }
 
-/** Check if a refresh token is valid (exists in Redis) */
+/** Check if a refresh token is valid */
 export async function isRefreshTokenValid(userId: string, token: string): Promise<boolean> {
   const result = await redis.get(`refresh:${userId}:${token}`);
   return result === '1';
@@ -28,7 +30,7 @@ export async function revokeRefreshToken(userId: string, token: string) {
   await redis.del(`refresh:${userId}:${token}`);
 }
 
-/** Revoke ALL refresh tokens for a user (force logout all sessions) */
+/** Revoke ALL refresh tokens for a user */
 export async function revokeAllRefreshTokens(userId: string) {
   const keys = await redis.keys(`refresh:${userId}:*`);
   if (keys.length > 0) await redis.del(...keys);
