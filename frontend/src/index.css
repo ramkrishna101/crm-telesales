@@ -1153,3 +1153,159 @@ textarea.form-input { resize: vertical; min-height: 64px; }
   background: var(--accent-subtle) !important;
   transform: scale(1.01);
 }
+
+/* ── Campaign Creation Wizard ─────────────────────────────────────────── */
+
+.modal--wide {
+  max-width: 560px;
+  width: 100%;
+}
+
+/* Step indicators */
+.wizard-steps {
+  display: flex;
+  align-items: center;
+  padding: 0 24px 20px;
+  gap: 0;
+}
+
+.wizard-step {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: 1;
+  color: var(--text-muted);
+}
+
+.wizard-step__dot {
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  border: 2px solid var(--border);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  font-size: 0.75rem;
+  font-weight: 700;
+  transition: all 0.2s;
+  background: var(--bg-secondary);
+}
+
+.wizard-step--active .wizard-step__dot {
+  border-color: var(--accent);
+  background: var(--accent);
+  color: #fff;
+}
+
+.wizard-step--done .wizard-step__dot {
+  border-color: #22c55e;
+  background: #14532d;
+  color: #22c55e;
+}
+
+.wizard-step__label {
+  font-size: 0.78rem;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.wizard-step--active .wizard-step__label { color: var(--accent); }
+.wizard-step--done .wizard-step__label { color: #22c55e; }
+
+.wizard-step__line {
+  flex: 1;
+  height: 2px;
+  background: var(--border);
+  margin: 0 8px;
+  min-width: 24px;
+}
+
+.wizard-step--done ~ .wizard-step .wizard-step__line,
+.wizard-step--done .wizard-step__line {
+  background: #22c55e44;
+}
+
+/* Team selection cards */
+.team-option {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 14px 16px;
+  border-radius: 10px;
+  border: 1px solid var(--border);
+  cursor: pointer;
+  transition: all 0.15s;
+  background: var(--bg-secondary);
+}
+
+.team-option:hover {
+  border-color: var(--accent);
+  background: var(--accent-subtle);
+}
+
+.team-option--selected {
+  border-color: var(--accent);
+  background: var(--accent-subtle);
+  box-shadow: 0 0 0 1px var(--accent);
+}
+
+.team-option__radio {
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  border: 2px solid var(--border);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  transition: border-color 0.15s;
+}
+
+.team-option--selected .team-option__radio {
+  border-color: var(--accent);
+}
+
+.team-option__radio-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--accent);
+}
+
+/* Agent selection rows */
+.agent-option {
+  display: flex;
+  align-items: center;
+  padding: 12px 14px;
+  border-radius: 10px;
+  border: 1px solid var(--border);
+  cursor: pointer;
+  transition: all 0.15s;
+  background: var(--bg-secondary);
+}
+
+.agent-option:hover {
+  border-color: var(--accent);
+  background: var(--accent-subtle);
+}
+
+.agent-option--selected {
+  border-color: #22c55e;
+  background: #14532d22;
+}
+
+.agent-option__check {
+  width: 24px;
+  height: 24px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--text-muted);
+  border-radius: 6px;
+  flex-shrink: 0;
+}
+
+.agent-option__check--active {
+  color: #22c55e;
+}
