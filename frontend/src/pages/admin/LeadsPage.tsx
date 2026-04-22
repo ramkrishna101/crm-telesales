@@ -3,7 +3,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { leadsService, usersService, campaignsService } from '../../services/crm.service';
 import AppLayout from '../../components/layout/AppLayout';
 import toast from 'react-hot-toast';
-import { Upload, Search, RefreshCw, ChevronLeft, ChevronRight, Download, FileSpreadsheet, CheckCircle2, X } from 'lucide-react';
+import { Upload, Search, RefreshCw, ChevronLeft, ChevronRight, Download, FileSpreadsheet, CheckCircle2, X, UserCheck } from 'lucide-react';
 
 // ── Template Download ─────────────────────────────────────────────────
 
@@ -274,6 +274,16 @@ export default function LeadsPage() {
     onSuccess: () => { qc.invalidateQueries({ queryKey: ['leads'] }); toast.success('Leads reclaimed'); setSelected([]); },
   });
 
+  const assignCampaignMutation = useMutation({
+    mutationFn: ({ campaignId, agentId }: { campaignId: string; agentId: string }) =>
+      leadsService.assignCampaign(campaignId, agentId),
+    onSuccess: (res) => {
+      qc.invalidateQueries({ queryKey: ['leads'] });
+      toast.success(res.data.data.message);
+    },
+    onError: () => toast.error('Assignment failed'),
+  });
+
   const leads: Lead[] = leadsData?.data?.data?.leads || [];
   const total: number = leadsData?.data?.data?.total || 0;
   const campaigns = campaignsData?.data?.data?.campaigns || [];
@@ -327,7 +337,25 @@ export default function LeadsPage() {
           />
         )}
 
-        {/* Filters */}
+          {/* Assign entire campaign in one click */}
+            {campaignFilter && (
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '8px 14px', background: 'var(--bg-elevated)', borderRadius: 10, border: '1px solid var(--border)', flexWrap: 'wrap' }}>
+                <UserCheck size={15} style={{ color: '#22d3ee', flexShrink: 0 }} />
+                <span style={{ fontSize: '0.82rem', color: 'var(--text-secondary)', whiteSpace: 'nowrap' }}>Assign all unassigned to:</span>
+                <select className="form-input" style={{ width: 160, padding: '5px 10px', fontSize: '0.82rem' }}
+                  defaultValue=""
+                  onChange={(e) => {
+                    if (e.target.value) {
+                      assignCampaignMutation.mutate({ campaignId: campaignFilter, agentId: e.target.value });
+                      e.target.value = '';
+                    }
+                  }}>
+                  <option value="">Pick agent…</option>
+                  {(agents as Record<string, string>[]).map(a => <option key={a.id} value={a.id}>{a.name}</option>)}
+                </select>
+                {assignCampaignMutation.isPending && <RefreshCw size={13} className="spin" style={{ color: 'var(--accent)' }} />}
+              </div>
+            )}
         <div className="filter-bar">
           <div className="search-box">
             <Search size={15} className="search-icon" />

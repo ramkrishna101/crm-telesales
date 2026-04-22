@@ -205,13 +205,43 @@ router.post('/assign', requireRole('admin', 'supervisor'), async (req: Request, 
     const agent = await prisma.user.findUnique({ where: { id: agentId } });
     if (!agent || agent.role !== 'agent') throw new AppError(400, 'INVALID_AGENT', 'Target user is not an agent');
 
+    // Assign ALL selected leads — including already-assigned ones (re-assign)
     const result = await prisma.lead.updateMany({
-      where: { id: { in: leadIds }, assignedToId: null }, // Only assign unassigned leads
+      where: { id: { in: leadIds } },
       data: { assignedToId: agentId },
     });
 
-    // Notify agent via Socket.io (imported in routes that need it)
     res.json({ success: true, data: { assigned: result.count, message: `Assigned ${result.count} leads to ${agent.name}` } });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// ── POST /api/leads/assign-campaign ───────────────────────────────────────
+// Admin assigns ALL unassigned leads in a campaign to an agent in one click
+
+router.post('/assign-campaign', requireRole('admin', 'supervisor'), async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const { campaignId, agentId } = z.object({
+      campaignId: z.string().uuid(),
+      agentId: z.string().uuid(),
+    }).parse(req.body);
+
+    const agent = await prisma.user.findUnique({ where: { id: agentId } });
+    if (!agent || agent.role !== 'agent') throw new AppError(400, 'INVALID_AGENT', 'Target user is not an agent');
+
+    const campaign = await prisma.campaign.findUnique({ where: { id: campaignId } });
+    if (!campaign) throw new AppError(404, 'CAMPAIGN_NOT_FOUND', 'Campaign not found');
+
+    const result = await prisma.lead.updateMany({
+      where: { campaignId, assignedToId: null },
+      data: { assignedToId: agentId },
+    });
+
+    res.json({
+      success: true,
+      data: { assigned: result.count, message: `Assigned ${result.count} unassigned leads in "${campaign.name}" to ${agent.name}` },
+    });
   } catch (err) {
     next(err);
   }

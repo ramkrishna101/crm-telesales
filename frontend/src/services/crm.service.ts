@@ -65,6 +65,8 @@ export const leadsService = {
   uploadStatus: (jobId: string) => api.get(`/leads/upload/status/${jobId}`),
   assign: (leadIds: string[], agentId: string) =>
     api.post('/leads/assign', { leadIds, agentId }),
+  assignCampaign: (campaignId: string, agentId: string) =>
+    api.post('/leads/assign-campaign', { campaignId, agentId }),
   reclaim: (leadIds: string[]) =>
     api.post('/leads/reclaim', { leadIds }),
   updateStatus: (id: string, status: string) =>
