@@ -65,40 +65,40 @@ function CampaignStatsModal({ campaignId, onClose }: { campaignId: string, onClo
         <div className="modal-body">
           {/* Summary Cards */}
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 16, marginBottom: 24 }}>
-            <div style={{ background: 'var(--bg-elevated)', padding: '20px', borderRadius: 12, border: '1px solid var(--border-subtle)', display: 'flex', flexDirection: 'column' }}>
+            <div style={{ background: 'var(--bg-elevated)', padding: '16px', borderRadius: 12, border: '1px solid var(--border-subtle)', display: 'flex', flexDirection: 'column' }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 8 }}>
-                <span style={{ color: 'var(--text-muted)', fontSize: '0.8rem', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.5px' }}>Data Available</span>
-                <Users2 size={16} style={{ color: 'var(--blue)' }} />
+                <span style={{ color: 'var(--text-muted)', fontSize: '0.75rem', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.5px', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>Available</span>
+                <Users2 size={16} style={{ color: 'var(--blue)', flexShrink: 0 }} />
               </div>
-              <div style={{ fontSize: '2.2rem', fontWeight: 800, lineHeight: 1, color: 'var(--text-primary)', marginBottom: 8 }}>{stats.dataAvailable || 0}</div>
-              <div style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>Fresh uncontacted leads</div>
+              <div style={{ fontSize: '2rem', fontWeight: 800, lineHeight: 1, color: 'var(--text-primary)', marginBottom: 8 }}>{stats.dataAvailable || 0}</div>
+              <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', lineHeight: 1.4 }}>Fresh uncontacted leads</div>
             </div>
 
-            <div style={{ background: 'var(--bg-elevated)', padding: '20px', borderRadius: 12, border: '1px solid var(--border-subtle)', display: 'flex', flexDirection: 'column' }}>
+            <div style={{ background: 'var(--bg-elevated)', padding: '16px', borderRadius: 12, border: '1px solid var(--border-subtle)', display: 'flex', flexDirection: 'column' }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 8 }}>
-                <span style={{ color: 'var(--text-muted)', fontSize: '0.8rem', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.5px' }}>Total Contacted</span>
-                <PhoneCall size={16} style={{ color: 'var(--accent)' }} />
+                <span style={{ color: 'var(--text-muted)', fontSize: '0.75rem', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.5px', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>Contacted</span>
+                <PhoneCall size={16} style={{ color: 'var(--accent)', flexShrink: 0 }} />
               </div>
-              <div style={{ fontSize: '2.2rem', fontWeight: 800, lineHeight: 1, color: 'var(--text-primary)', marginBottom: 8 }}>{stats.totalContacted}</div>
-              <div style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>out of {stats.totalLeads} total leads</div>
+              <div style={{ fontSize: '2rem', fontWeight: 800, lineHeight: 1, color: 'var(--text-primary)', marginBottom: 8 }}>{stats.totalContacted}</div>
+              <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', lineHeight: 1.4 }}>out of {stats.totalLeads} total leads</div>
             </div>
 
-            <div style={{ background: 'var(--bg-elevated)', padding: '20px', borderRadius: 12, border: '1px solid var(--border-subtle)', display: 'flex', flexDirection: 'column' }}>
+            <div style={{ background: 'var(--bg-elevated)', padding: '16px', borderRadius: 12, border: '1px solid var(--border-subtle)', display: 'flex', flexDirection: 'column' }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 8 }}>
-                <span style={{ color: 'var(--text-muted)', fontSize: '0.8rem', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.5px' }}>Conversions</span>
-                <TrendingUp size={16} style={{ color: 'var(--green)' }} />
+                <span style={{ color: 'var(--text-muted)', fontSize: '0.75rem', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.5px', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>Conversions</span>
+                <TrendingUp size={16} style={{ color: 'var(--green)', flexShrink: 0 }} />
               </div>
-              <div style={{ fontSize: '2.2rem', fontWeight: 800, lineHeight: 1, color: 'var(--green)', marginBottom: 8 }}>{stats.leadsByStatus['lead'] || 0}</div>
-              <div style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>Interested customers</div>
+              <div style={{ fontSize: '2rem', fontWeight: 800, lineHeight: 1, color: 'var(--green)', marginBottom: 8 }}>{stats.leadsByStatus['lead'] || 0}</div>
+              <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', lineHeight: 1.4 }}>Interested customers</div>
             </div>
 
-            <div style={{ background: 'var(--bg-elevated)', padding: '20px', borderRadius: 12, border: '1px solid var(--border-subtle)', display: 'flex', flexDirection: 'column' }}>
+            <div style={{ background: 'var(--bg-elevated)', padding: '16px', borderRadius: 12, border: '1px solid var(--border-subtle)', display: 'flex', flexDirection: 'column' }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 8 }}>
-                <span style={{ color: 'var(--text-muted)', fontSize: '0.8rem', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.5px' }}>Conv. Rate</span>
-                <BarChart2 size={16} style={{ color: 'var(--purple)' }} />
+                <span style={{ color: 'var(--text-muted)', fontSize: '0.75rem', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.5px', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>Conv. Rate</span>
+                <BarChart2 size={16} style={{ color: 'var(--purple)', flexShrink: 0 }} />
               </div>
-              <div style={{ fontSize: '2.2rem', fontWeight: 800, lineHeight: 1, color: 'var(--text-primary)', marginBottom: 8 }}>{stats.conversionRate}</div>
-              <div style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>Contacted to Interested</div>
+              <div style={{ fontSize: '2rem', fontWeight: 800, lineHeight: 1, color: 'var(--text-primary)', marginBottom: 8 }}>{stats.conversionRate}</div>
+              <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', lineHeight: 1.4 }}>Contacted to Interested</div>
             </div>
           </div>
 
