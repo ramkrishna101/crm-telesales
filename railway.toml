@@ -7,3 +7,6 @@ startCommand = "npm start"
 healthcheckPath = "/api/users/me"
 healthcheckTimeout = 100
 restartPolicyType = "ON_FAILURE"
+
+[env]
+NPM_CONFIG_PRODUCTION = "false"

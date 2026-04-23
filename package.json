@@ -3,6 +3,10 @@
   "version": "1.0.0",
   "description": "Telesales CRM monorepo",
   "private": true,
+  "workspaces": [
+    "frontend",
+    "backend"
+  ],
   "scripts": {
     "dev": "concurrently \"npm run dev:backend\" \"npm run dev:frontend\"",
     "dev:backend": "cd backend && npm run dev",
