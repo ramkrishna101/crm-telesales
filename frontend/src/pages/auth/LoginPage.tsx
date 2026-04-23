@@ -30,7 +30,7 @@ export default function LoginPage() {
     register,
     handleSubmit,
     formState: { errors },
-  } = useForm<LoginForm>({ resolver: zodResolver(loginSchema) });
+  } = useForm<LoginForm>({ resolver: zodResolver(loginSchema as any) });
 
   const onSubmit = async (values: LoginForm) => {
     setIsLoading(true);
