@@ -302,6 +302,7 @@ router.get('/:id/stats', requireRole('admin', 'supervisor'), async (req: Request
         campaignId, 
         totalLeads, 
         totalContacted,
+        dataAvailable: leadsMap['uncontacted'] || 0,
         leadsByStatus: leadsMap, 
         totalCalls,
         conversionRate,

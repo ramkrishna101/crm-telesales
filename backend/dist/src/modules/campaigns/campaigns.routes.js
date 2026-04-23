@@ -13,15 +13,15 @@ const createCampaignSchema = zod_1.z.object({
     description: zod_1.z.string().optional(),
     type: zod_1.z.enum(['standard', 'vip']).default('standard'),
     priority: zod_1.z.enum(['normal', 'high']).default('normal'),
-    teamId: zod_1.z.string().uuid().optional().nullable(),
-    agentIds: zod_1.z.array(zod_1.z.string().uuid()).optional(),
+    teamId: zod_1.z.string().optional().nullable(),
+    agentIds: zod_1.z.array(zod_1.z.string()).optional(),
 });
 const updateCampaignSchema = zod_1.z.object({
     name: zod_1.z.string().min(2).optional(),
     description: zod_1.z.string().optional(),
     status: zod_1.z.enum(['active', 'paused', 'closed']).optional(),
     priority: zod_1.z.enum(['normal', 'high']).optional(),
-    teamId: zod_1.z.string().uuid().optional().nullable(),
+    teamId: zod_1.z.string().optional().nullable(),
     script: zod_1.z.string().optional(),
 });
 // ── GET /api/campaigns ────────────────────────────────────────────────
@@ -198,7 +198,7 @@ router.put('/:id', (0, auth_1.requireRole)('admin', 'supervisor'), async (req, r
 router.post('/:id/agents', (0, auth_1.requireRole)('admin'), async (req, res, next) => {
     try {
         const id = (0, params_1.param)(req, 'id');
-        const { agentIds } = zod_1.z.object({ agentIds: zod_1.z.array(zod_1.z.string().uuid()).min(1) }).parse(req.body);
+        const { agentIds } = zod_1.z.object({ agentIds: zod_1.z.array(zod_1.z.string()).min(1) }).parse(req.body);
         const campaign = await prisma_1.prisma.campaign.findUnique({ where: { id } });
         if (!campaign)
             throw new errorHandler_1.AppError(404, 'CAMPAIGN_NOT_FOUND', 'Campaign not found');
@@ -217,7 +217,7 @@ router.post('/:id/agents', (0, auth_1.requireRole)('admin'), async (req, res, ne
 router.delete('/:id/agents', (0, auth_1.requireRole)('admin'), async (req, res, next) => {
     try {
         const id = (0, params_1.param)(req, 'id');
-        const { agentIds } = zod_1.z.object({ agentIds: zod_1.z.array(zod_1.z.string().uuid()).min(1) }).parse(req.body);
+        const { agentIds } = zod_1.z.object({ agentIds: zod_1.z.array(zod_1.z.string()).min(1) }).parse(req.body);
         await prisma_1.prisma.campaignAgent.deleteMany({ where: { campaignId: id, agentId: { in: agentIds } } });
         res.json({ success: true, data: { message: `Removed ${agentIds.length} agents from campaign` } });
     }
@@ -268,6 +268,7 @@ router.get('/:id/stats', (0, auth_1.requireRole)('admin', 'supervisor'), async (
                 campaignId,
                 totalLeads,
                 totalContacted,
+                dataAvailable: leadsMap['uncontacted'] || 0,
                 leadsByStatus: leadsMap,
                 totalCalls,
                 conversionRate,

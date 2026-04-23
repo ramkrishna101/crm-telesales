@@ -64,7 +64,16 @@ function CampaignStatsModal({ campaignId, onClose }: { campaignId: string, onClo
 
         <div className="modal-body">
           {/* Summary Cards */}
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 16, marginBottom: 24 }}>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 16, marginBottom: 24 }}>
+            <div style={{ background: 'var(--bg-elevated)', padding: '20px', borderRadius: 12, border: '1px solid var(--border-subtle)', display: 'flex', flexDirection: 'column' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 8 }}>
+                <span style={{ color: 'var(--text-muted)', fontSize: '0.8rem', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.5px' }}>Data Available</span>
+                <Users2 size={16} style={{ color: 'var(--blue)' }} />
+              </div>
+              <div style={{ fontSize: '2.2rem', fontWeight: 800, lineHeight: 1, color: 'var(--text-primary)', marginBottom: 8 }}>{stats.dataAvailable || 0}</div>
+              <div style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>Fresh uncontacted leads</div>
+            </div>
+
             <div style={{ background: 'var(--bg-elevated)', padding: '20px', borderRadius: 12, border: '1px solid var(--border-subtle)', display: 'flex', flexDirection: 'column' }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 8 }}>
                 <span style={{ color: 'var(--text-muted)', fontSize: '0.8rem', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.5px' }}>Total Contacted</span>
