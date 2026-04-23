@@ -229,7 +229,11 @@ function CampaignWizard({ teams, agents, onClose, onCreate }: {
       onCreate(campaignId);
       onClose();
     } catch (err: any) {
-      toast.error(err.response?.data?.message || 'Something went wrong');
+      const msg = err.response?.data?.error?.details?.[0]?.message 
+        || err.response?.data?.error?.message 
+        || err.response?.data?.message 
+        || 'Something went wrong';
+      toast.error(msg);
     } finally {
       setIsProcessing(false);
     }

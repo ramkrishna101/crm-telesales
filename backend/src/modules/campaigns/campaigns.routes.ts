@@ -13,8 +13,8 @@ const createCampaignSchema = z.object({
   description: z.string().optional(),
   type: z.enum(['standard', 'vip']).default('standard'),
   priority: z.enum(['normal', 'high']).default('normal'),
-  teamId: z.string().uuid().optional().nullable(),
-  agentIds: z.array(z.string().uuid()).optional(),
+  teamId: z.string().optional().nullable(),
+  agentIds: z.array(z.string()).optional(),
 });
 
 const updateCampaignSchema = z.object({
@@ -22,7 +22,7 @@ const updateCampaignSchema = z.object({
   description: z.string().optional(),
   status: z.enum(['active', 'paused', 'closed']).optional(),
   priority: z.enum(['normal', 'high']).optional(),
-  teamId: z.string().uuid().optional().nullable(),
+  teamId: z.string().optional().nullable(),
   script: z.string().optional(),
 });
 
@@ -218,7 +218,7 @@ router.put('/:id', requireRole('admin', 'supervisor'), async (req: Request, res:
 router.post('/:id/agents', requireRole('admin'), async (req: Request, res: Response, next: NextFunction) => {
   try {
     const id = param(req, 'id');
-    const { agentIds } = z.object({ agentIds: z.array(z.string().uuid()).min(1) }).parse(req.body);
+    const { agentIds } = z.object({ agentIds: z.array(z.string()).min(1) }).parse(req.body);
 
     const campaign = await prisma.campaign.findUnique({ where: { id } });
     if (!campaign) throw new AppError(404, 'CAMPAIGN_NOT_FOUND', 'Campaign not found');
@@ -243,7 +243,7 @@ router.post('/:id/agents', requireRole('admin'), async (req: Request, res: Respo
 router.delete('/:id/agents', requireRole('admin'), async (req: Request, res: Response, next: NextFunction) => {
   try {
     const id = param(req, 'id');
-    const { agentIds } = z.object({ agentIds: z.array(z.string().uuid()).min(1) }).parse(req.body);
+    const { agentIds } = z.object({ agentIds: z.array(z.string()).min(1) }).parse(req.body);
     await prisma.campaignAgent.deleteMany({ where: { campaignId: id, agentId: { in: agentIds } } });
     res.json({ success: true, data: { message: `Removed ${agentIds.length} agents from campaign` } });
   } catch (err) {
