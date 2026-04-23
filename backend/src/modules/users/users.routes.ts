@@ -18,6 +18,9 @@ const createUserSchema = z.object({
   password: z.string().min(6),
   role: z.enum(['admin', 'supervisor', 'agent']),
   teamId: z.string().uuid().optional().nullable(),
+}).refine(data => !(data.role === 'agent' && !data.teamId), {
+  message: "Agents must be assigned to a team to ensure supervisor oversight",
+  path: ["teamId"],
 });
 
 const updateUserSchema = z.object({
@@ -27,6 +30,12 @@ const updateUserSchema = z.object({
   role: z.enum(['admin', 'supervisor', 'agent']).optional(),
   teamId: z.string().uuid().optional().nullable(),
   status: z.enum(['active', 'inactive']).optional(),
+}).refine(data => {
+  if (data.role === 'agent' && data.teamId === null) return false;
+  return true;
+}, {
+  message: "Agents cannot be unassigned from a team",
+  path: ["teamId"],
 });
 
 // ── GET /api/users ────────────────────────────────────────────────────
@@ -146,6 +155,40 @@ router.put('/:id', requireRole('admin'), async (req: Request, res: Response, nex
   }
 });
 
+// ── POST /api/users/:id/reset-password ────────────────────────────────
+// Admin can reset anyone's password.
+// Supervisor can reset passwords for agents in their team.
+
+router.post('/:id/reset-password', requireRole('admin', 'supervisor'), async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const id = param(req, 'id');
+    const { password } = z.object({ password: z.string().min(6) }).parse(req.body);
+    const { role: callerRole, userId: callerId } = req.user!;
+
+    const targetUser = await prisma.user.findUnique({ where: { id }, include: { team: true } });
+    if (!targetUser) throw new AppError(404, 'USER_NOT_FOUND', 'User not found');
+
+    // Access Control:
+    if (callerRole === 'supervisor') {
+      if (targetUser.role !== 'agent') throw new AppError(403, 'FORBIDDEN', 'Supervisors can only reset passwords for agents');
+      if (targetUser.team?.supervisorId !== callerId) throw new AppError(403, 'FORBIDDEN', 'This agent is not in your team');
+    }
+
+    const passwordHash = await bcrypt.hash(password, 12);
+    await prisma.user.update({
+      where: { id },
+      data: { passwordHash }
+    });
+
+    // Security: Kill all sessions for this user
+    await revokeAllRefreshTokens(id);
+
+    res.json({ success: true, data: { message: `Password reset successfully for ${targetUser.name}` } });
+  } catch (err) {
+    next(err);
+  }
+});
+
 // ── DELETE /api/users/:id (soft deactivate) ───────────────────────────
 
 router.delete('/:id', requireRole('admin'), async (req: Request, res: Response, next: NextFunction) => {
@@ -176,6 +219,76 @@ router.get('/:id/stats', requireRole('admin', 'supervisor'), async (req: Request
     ]);
 
     res.json({ success: true, data: { agentId, totalCalls, totalLeads, followUpsCount } });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// ── POST /api/users/me/break/start ──────────────────────────────────────
+router.post('/me/break/start', async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const userId = req.user!.userId;
+    const user = await prisma.user.findUnique({ where: { id: userId } });
+    if (user?.status === 'on_break') throw new AppError(400, 'ALREADY_ON_BREAK', 'You are already on break');
+
+    await prisma.$transaction([
+      prisma.user.update({
+        where: { id: userId },
+        data: { status: 'on_break', breakStartedAt: new Date() }
+      }),
+      prisma.breakLog.create({
+        data: { agentId: userId, startedAt: new Date() }
+      })
+    ]);
+    res.json({ success: true, data: { message: 'Break started', status: 'on_break' } });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// ── POST /api/users/me/break/end ────────────────────────────────────────
+router.post('/me/break/end', async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const userId = req.user!.userId;
+    const user = await prisma.user.findUnique({ where: { id: userId } });
+    if (user?.status !== 'on_break') throw new AppError(400, 'NOT_ON_BREAK', 'You are not on break');
+
+    const openBreak = await prisma.breakLog.findFirst({
+      where: { agentId: userId, endedAt: null },
+      orderBy: { startedAt: 'desc' }
+    });
+
+    await prisma.$transaction([
+      prisma.user.update({
+        where: { id: userId },
+        data: { status: 'active', breakStartedAt: null }
+      }),
+      ...(openBreak ? [prisma.breakLog.update({
+        where: { id: openBreak.id },
+        data: { endedAt: new Date() }
+      })] : [])
+    ]);
+
+    res.json({ success: true, data: { message: 'Break ended', status: 'active' } });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// ── GET /api/users/:id/breaks ──────────────────────────────────────────
+router.get('/:id/breaks', requireRole('admin', 'supervisor'), async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const agentId = param(req, 'id');
+    const { from, to } = req.query as Record<string, string>;
+    const dateFilter = from && to ? { gte: new Date(from), lte: new Date(to) } : undefined;
+
+    const breaks = await prisma.breakLog.findMany({
+      where: { agentId, ...(dateFilter ? { startedAt: dateFilter } : {}) },
+      orderBy: { startedAt: 'desc' },
+      take: 100
+    });
+
+    res.json({ success: true, data: breaks });
   } catch (err) {
     next(err);
   }

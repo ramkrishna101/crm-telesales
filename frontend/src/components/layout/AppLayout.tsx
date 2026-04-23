@@ -1,6 +1,6 @@
 import { NavLink, useNavigate } from 'react-router-dom';
 import { useAuthStore } from '../../store/authStore';
-import { authService } from '../../services/crm.service';
+import { authService, agentService } from '../../services/crm.service';
 import toast from 'react-hot-toast';
 import {
   LayoutDashboard, Users, Building2, PhoneCall,
@@ -31,6 +31,7 @@ const supervisorNav: NavItem[] = [
 
 const agentNav: NavItem[] = [
   { icon: <LayoutDashboard size={18} />, label: 'Workspace', to: '/agent' },
+  { icon: <Users size={18} />, label: 'Interested Leads', to: '/agent/leads' },
   { icon: <ListChecks size={18} />, label: 'Follow-ups', to: '/agent/follow-ups' },
   { icon: <PhoneCall size={18} />, label: 'Call History', to: '/agent/calls' },
 ];
@@ -39,7 +40,7 @@ const roleNavs = { admin: adminNav, supervisor: supervisorNav, agent: agentNav }
 const roleTitles = { admin: 'Admin Panel', supervisor: 'Supervisor', agent: 'Agent Workspace' };
 
 export default function AppLayout({ children }: { children: React.ReactNode }) {
-  const { user, logout, refreshToken } = useAuthStore();
+  const { user, logout, refreshToken, updateUser } = useAuthStore();
   const navigate = useNavigate();
   const role = user?.role || 'agent';
   const navItems = roleNavs[role] || agentNav;
@@ -85,19 +86,43 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
         </nav>
 
         {/* User footer */}
-        <div className="sidebar-footer">
-          <div className="sidebar-user">
-            <div className="sidebar-avatar">
-              {user?.name?.charAt(0).toUpperCase() || '?'}
+        <div className="sidebar-footer" style={{ flexDirection: 'column', alignItems: 'stretch' }}>
+          {role === 'agent' && (
+            <div style={{ marginBottom: 16, paddingBottom: 16, borderBottom: '1px solid rgba(255,255,255,0.05)', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+              <span style={{ fontSize: '0.85rem', color: 'var(--text-secondary)' }}>Status</span>
+              <button 
+                onClick={async () => {
+                  try {
+                    const isBreak = user?.status === 'on_break';
+                    const res = isBreak ? await agentService.breakEnd() : await agentService.breakStart();
+                    updateUser({ status: res.data.data.status });
+                    toast.success(res.data.data.message);
+                  } catch (err: any) {
+                    toast.error(err.response?.data?.error?.message || 'Failed to update status');
+                  }
+                }}
+                className={`badge ${user?.status === 'on_break' ? 'badge--warning' : 'badge--success'}`} 
+                style={{ cursor: 'pointer', border: 'none', transition: '0.2s', padding: '4px 8px' }}
+                title="Click to toggle break"
+              >
+                {user?.status === 'on_break' ? 'On Break' : 'Active'}
+              </button>
             </div>
-            <div className="sidebar-user-info">
-              <div className="sidebar-user-name">{user?.name}</div>
-              <div className="sidebar-user-email">{user?.email}</div>
+          )}
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '8px' }}>
+            <div className="sidebar-user" style={{ flex: 1, minWidth: 0 }}>
+              <div className="sidebar-avatar">
+                {user?.name?.charAt(0).toUpperCase() || '?'}
+              </div>
+              <div className="sidebar-user-info" style={{ overflow: 'hidden' }}>
+                <div className="sidebar-user-name" style={{ whiteSpace: 'nowrap', textOverflow: 'ellipsis', overflow: 'hidden' }}>{user?.name}</div>
+                <div className="sidebar-user-email" style={{ whiteSpace: 'nowrap', textOverflow: 'ellipsis', overflow: 'hidden' }}>{user?.email}</div>
+              </div>
             </div>
+            <button className="sidebar-logout" onClick={handleLogout} title="Log out" style={{ flexShrink: 0 }}>
+              <LogOut size={16} />
+            </button>
           </div>
-          <button className="sidebar-logout" onClick={handleLogout} title="Log out">
-            <LogOut size={16} />
-          </button>
         </div>
       </aside>
 

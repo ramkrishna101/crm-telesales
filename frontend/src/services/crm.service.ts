@@ -19,8 +19,12 @@ export const usersService = {
   create: (data: Record<string, unknown>) => api.post('/users', data),
   update: (id: string, data: Record<string, unknown>) => api.put(`/users/${id}`, data),
   deactivate: (id: string) => api.delete(`/users/${id}`),
+  resetPassword: (id: string, password: string) =>
+    api.post(`/users/${id}/reset-password`, { password }),
   stats: (id: string, params?: Record<string, string>) =>
     api.get(`/users/${id}/stats`, { params }),
+  getBreaks: (id: string, params?: Record<string, string>) =>
+    api.get(`/users/${id}/breaks`, { params }),
 };
 
 // ── Teams ─────────────────────────────────────────────────────────────
@@ -71,6 +75,7 @@ export const leadsService = {
     api.post('/leads/reclaim', { leadIds }),
   updateStatus: (id: string, status: string) =>
     api.put(`/leads/${id}/status`, { status }),
+  addComment: (id: string, content: string) => api.post(`/leads/${id}/comments`, { content }),
 };
 
 // ── Calls ─────────────────────────────────────────────────────────────
@@ -105,8 +110,8 @@ export const agentService = {
   dashboard: () => api.get('/agent/dashboard'),
   nextLead: (campaignId?: string) =>
     api.get('/agent/next-lead', { params: campaignId ? { campaignId } : {} }),
-  breakStart: () => api.post('/agent/break/start'),
-  breakEnd: () => api.post('/agent/break/end'),
+  breakStart: () => api.post('/users/me/break/start'),
+  breakEnd: () => api.post('/users/me/break/end'),
   breakHistory: () => api.get('/agent/break-history'),
   initiateCall: (leadId: string) =>
     api.post('/agent/call/initiate', { leadId }),

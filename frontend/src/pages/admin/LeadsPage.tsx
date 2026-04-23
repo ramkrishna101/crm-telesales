@@ -242,6 +242,7 @@ export default function LeadsPage() {
   const qc = useQueryClient();
   const [campaignFilter, setCampaignFilter] = useState('');
   const [statusFilter, setStatusFilter] = useState('');
+  const [agentFilter, setAgentFilter] = useState('');
   const [search, setSearch] = useState('');
   const [page, setPage] = useState(1);
   const [showUpload, setShowUpload] = useState(false);
@@ -249,8 +250,14 @@ export default function LeadsPage() {
   const LIMIT = 50;
 
   const { data: leadsData, isLoading } = useQuery({
-    queryKey: ['leads', page, campaignFilter, statusFilter],
-    queryFn: () => leadsService.list({ page, limit: LIMIT, ...(campaignFilter ? { campaignId: campaignFilter } : {}), ...(statusFilter ? { status: statusFilter } : {}) }),
+    queryKey: ['leads', page, campaignFilter, statusFilter, agentFilter],
+    queryFn: () => leadsService.list({ 
+      page, 
+      limit: LIMIT, 
+      ...(campaignFilter ? { campaignId: campaignFilter } : {}), 
+      ...(statusFilter ? { status: statusFilter } : {}),
+      ...(agentFilter ? { assignedToId: agentFilter } : {})
+    }),
   });
 
   const { data: campaignsData } = useQuery({
@@ -364,6 +371,11 @@ export default function LeadsPage() {
           <select className="form-input" style={{ width: 180 }} value={campaignFilter} onChange={(e) => { setCampaignFilter(e.target.value); setPage(1); }}>
             <option value="">All Campaigns</option>
             {(campaigns as Record<string, string>[]).map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+          </select>
+          <select className="form-input" style={{ width: 180 }} value={agentFilter} onChange={(e) => { setAgentFilter(e.target.value); setPage(1); }}>
+            <option value="">All Agents</option>
+            <option value="null">Unassigned</option>
+            {(agents as Record<string, string>[]).map((a) => <option key={a.id} value={a.id}>{a.name}</option>)}
           </select>
           <div className="filter-tabs">
             {['', 'uncontacted', 'contacted', 'lead', 'callback', 'not_interested', 'invalid', 'dnd'].map((s) => (

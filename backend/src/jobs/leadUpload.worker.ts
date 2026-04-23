@@ -95,6 +95,15 @@ export function startLeadUploadWorker() {
 
       await setUploadProgress(job.id!, { status: 'importing', total, inserted: 0, skipped: 0 });
 
+      // ── Distribution Logic ──────────────────────────────────────────
+      // Fetch all agents assigned to this campaign for auto-distribution
+      const campaignAgents = await prisma.campaignAgent.findMany({
+        where: { campaignId },
+        select: { agentId: true },
+      });
+      const agentIds = campaignAgents.map(ca => ca.agentId);
+      let agentIndex = 0;
+
       // Process in chunks of 500 for memory efficiency
       const CHUNK_SIZE = 500;
       for (let i = 0; i < rows.length; i += CHUNK_SIZE) {
@@ -127,18 +136,30 @@ export function startLeadUploadWorker() {
 
         if (cleanLeads.length === 0) continue;
 
-        await prisma.lead.createMany({
-          data: cleanLeads.map((l) => ({
+        // Prepare data with Round Robin assignment
+        const finalData = cleanLeads.map((l) => {
+          const assignedToId = agentIds.length > 0 ? agentIds[agentIndex] : null;
+          if (agentIds.length > 0) {
+            agentIndex = (agentIndex + 1) % agentIds.length;
+          }
+          
+          return {
             campaignId,
             phone: l.phone,
             email: l.email,
             name: l.name,
+            assignedToId,
             customFields: Object.keys(l.customFields).length > 0 ? l.customFields : undefined,
-          })),
+          };
+        });
+
+        const createResult = await prisma.lead.createMany({
+          data: finalData,
           skipDuplicates: true,
         });
 
-        inserted += cleanLeads.length;
+        inserted += createResult.count;
+        skipped += (cleanLeads.length - createResult.count);
         const progress = Math.round(((i + CHUNK_SIZE) / total) * 100);
         await job.updateProgress(progress);
         await setUploadProgress(job.id!, {

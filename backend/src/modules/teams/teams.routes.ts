@@ -30,6 +30,7 @@ router.get('/', requireRole('admin', 'supervisor'), async (req: Request, res: Re
       orderBy: { name: 'asc' },
       include: {
         supervisor: { select: { id: true, name: true, email: true } },
+        members: { select: { id: true, name: true, email: true, status: true, role: true } },
         _count: { select: { members: true } },
       },
     });

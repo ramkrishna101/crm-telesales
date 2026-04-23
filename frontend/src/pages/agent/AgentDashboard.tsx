@@ -5,7 +5,7 @@ import AppLayout from '../../components/layout/AppLayout';
 import toast from 'react-hot-toast';
 import {
   Phone, PhoneOff, Coffee, Clock, CheckCircle,
-  ChevronRight, RefreshCw, Calendar, AlertCircle, PhoneCall
+  ChevronRight, RefreshCw, Calendar, AlertCircle, PhoneCall, Copy, CopyCheck
 } from 'lucide-react';
 
 interface Lead {
@@ -16,7 +16,11 @@ interface Lead {
 interface Tag { id: string; name: string; colour: string; }
 interface FollowUp {
   id: string; leadId: string; scheduledAt: string; status: string; notes?: string;
-  lead: { id: string; name: string | null; phone: string; };
+  lead: Lead;
+}
+interface RecentCall {
+  id: string; leadId: string; calledAt: string; dispositionTag: string;
+  lead: Lead;
 }
 
 // ── Call Timer ────────────────────────────────────────────────────────
@@ -134,13 +138,83 @@ function DispositionPanel({
   );
 }
 
+// ── Leads List Modal ─────────────────────────────────────────────────
+
+function DispositionLeadsModal({
+  tag, onClose, onLoadLead,
+}: { tag: string; onClose: () => void; onLoadLead: (lead: Lead) => void; }) {
+  const { data, isLoading } = useQuery({
+    queryKey: ['calls', 'tag-details', tag],
+    queryFn: () => {
+      const today = new Date();
+      today.setHours(0, 0, 0, 0);
+      return callsService.list({ tag, from: today.toISOString() });
+    },
+  });
+
+  const logs = data?.data?.data?.logs || [];
+
+  return (
+    <div className="modal-overlay">
+      <div className="modal-content" style={{ maxWidth: 600, width: '90%' }}>
+        <div className="modal-header">
+          <h3 className="modal-title">Leads: {tag}</h3>
+          <button className="btn-icon" onClick={onClose} style={{ fontSize: '1.5rem', lineHeight: 1 }}>&times;</button>
+        </div>
+        <div className="modal-body" style={{ maxHeight: '60vh', overflowY: 'auto', padding: 0 }}>
+          {isLoading ? (
+            <div className="empty-state">Loading...</div>
+          ) : logs.length === 0 ? (
+            <div className="empty-state">No calls found with this disposition today.</div>
+          ) : (
+            logs.map((log: any) => (
+              <div key={log.id} className="followup-row" style={{ padding: '12px 16px', borderBottom: '1px solid var(--border)' }}>
+                <div style={{ flex: 1 }}>
+                  <div style={{ fontWeight: 600, color: 'var(--text-primary)' }}>{log.lead.name || 'Unknown'}</div>
+                  <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>
+                    {log.lead.phoneMasked} · {new Date(log.calledAt).toLocaleTimeString()}
+                  </div>
+                </div>
+                <button
+                  className="btn-icon"
+                  title="Load Lead"
+                  onClick={() => {
+                    onLoadLead(log.lead);
+                    onClose();
+                  }}
+                >
+                  <ChevronRight size={16} />
+                </button>
+              </div>
+            ))
+          )}
+        </div>
+        <div className="modal-footer">
+          <button className="btn btn-secondary" onClick={onClose}>Close</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // ── Agent Dashboard ───────────────────────────────────────────────────
 
 export default function AgentWorkspace() {
   const qc = useQueryClient();
   const [activeLead, setActiveLead] = useState<Lead | null>(null);
+  const [selectedTagForList, setSelectedTagForList] = useState<string | null>(null);
+  const [realPhone, setRealPhone] = useState<string | null>(null);
   const [callActive, setCallActive] = useState(false);
   const [showDisposition, setShowDisposition] = useState(false);
+  const [copied, setCopied] = useState(false);
+
+  const copyPhone = (phone: string) => {
+    navigator.clipboard.writeText(phone).then(() => {
+      setCopied(true);
+      toast.success(`📋 Copied: ${phone}`, { duration: 2000, icon: '📞' });
+      setTimeout(() => setCopied(false), 2000);
+    }).catch(() => toast.error('Clipboard not available'));
+  };
 
   const { data: dashData, refetch: refetchDash } = useQuery({
     queryKey: ['agent-dashboard'],
@@ -154,11 +228,6 @@ export default function AgentWorkspace() {
     enabled: !activeLead,
   });
 
-  const { data: followUpsData } = useQuery({
-    queryKey: ['agent-followups'],
-    queryFn: () => followUpsService.list({ status: 'pending' }),
-  });
-
   const { data: tagsData } = useQuery({
     queryKey: ['tags'],
     queryFn: () => tagsService.list(),
@@ -166,7 +235,13 @@ export default function AgentWorkspace() {
 
   const initCallMutation = useMutation({
     mutationFn: (leadId: string) => agentService.initiateCall(leadId),
-    onSuccess: () => { setCallActive(true); toast.success('Call initiated'); },
+    onSuccess: (res) => {
+      setCallActive(true);
+      const phone: string = res?.data?.data?.phone || currentLead?.phoneMasked || '';
+      setRealPhone(res?.data?.data?.phone || null);
+      copyPhone(phone);
+      toast.success('Call initiated');
+    },
     onError: () => toast.error('Call initiation failed'),
   });
 
@@ -175,7 +250,7 @@ export default function AgentWorkspace() {
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['agent-dashboard'] });
       qc.invalidateQueries({ queryKey: ['agent-next-lead'] });
-      setActiveLead(null); setCallActive(false); setShowDisposition(false);
+      setActiveLead(null); setRealPhone(null); setCallActive(false); setShowDisposition(false);
       toast.success('Call logged ✓');
     },
     onError: () => toast.error('Failed to log call'),
@@ -196,13 +271,14 @@ export default function AgentWorkspace() {
 
   const followUpDoneMutation = useMutation({
     mutationFn: (id: string) => followUpsService.update(id, { status: 'done' }),
-    onSuccess: () => { qc.invalidateQueries({ queryKey: ['agent-followups'] }); toast.success('Follow-up done'); },
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ['agent-dashboard'] }); toast.success('Follow-up done'); },
   });
 
   const stats = dashData?.data?.data?.stats;
   const nextLeadResp = nextLeadData?.data?.data;
   const currentLead: Lead = activeLead || (nextLeadResp?.lead as Lead);
-  const followUps: FollowUp[] = followUpsData?.data?.data?.followUps || [];
+  const followUps: FollowUp[] = dashData?.data?.data?.followUpsToday || [];
+  const recentCalls: RecentCall[] = dashData?.data?.data?.recentCalls || [];
   const tags: Tag[] = tagsData?.data?.data || [];
 
   const handleLogCall = async (tag: string, notes: string, duration: number, scheduledAt?: string) => {
@@ -261,7 +337,7 @@ export default function AgentWorkspace() {
         </div>
 
         <div className="two-col-grid">
-          {/* CALL PANEL */}
+          {/* MAIN CALL PANEL */}
           <div className="card">
             <div className="card-header">
               <h2 className="card-title">
@@ -289,8 +365,18 @@ export default function AgentWorkspace() {
                         <div style={{ fontWeight: 700, fontSize: '1.1rem', color: 'var(--text-primary)' }}>
                           {currentLead.name || 'Unknown'}
                         </div>
-                        <div style={{ fontSize: '1.3rem', fontWeight: 800, letterSpacing: 2, color: 'var(--accent)', margin: '8px 0' }}>
-                          {currentLead.phoneMasked}
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 10, margin: '8px 0' }}>
+                          <div style={{ fontSize: '1.3rem', fontWeight: 800, letterSpacing: 2, color: 'var(--accent)' }}>
+                            {currentLead.phoneMasked}
+                          </div>
+                          <button
+                            className="btn-icon"
+                            title="Copy phone number"
+                            onClick={() => copyPhone(realPhone || currentLead.phoneMasked)}
+                            style={{ color: copied ? '#22c55e' : 'var(--text-muted)' }}
+                          >
+                            {copied ? <CopyCheck size={16} /> : <Copy size={16} />}
+                          </button>
                         </div>
                         {currentLead.campaign && (
                           <div style={{ fontSize: '0.78rem', color: 'var(--text-muted)' }}>
@@ -328,8 +414,8 @@ export default function AgentWorkspace() {
                       style={{ width: '100%', padding: '14px', fontSize: '1rem' }}
                       disabled={currentLead.isDnd || initCallMutation.isPending}
                       onClick={() => {
-                        initCallMutation.mutate(currentLead.id);
                         setActiveLead(currentLead);
+                        initCallMutation.mutate(currentLead.id);
                       }}
                     >
                       <Phone size={18} /> {currentLead.isDnd ? 'DND — Cannot Call' : 'Initiate Call'}
@@ -355,42 +441,73 @@ export default function AgentWorkspace() {
             )}
           </div>
 
-          {/* FOLLOW-UPS */}
-          <div className="card">
-            <div className="card-header">
-              <h2 className="card-title">Today's Follow-ups</h2>
-              <span className="badge" style={{ background: '#1e293b', color: '#a78bfa' }}>
-                {followUps.filter(f => new Date(f.scheduledAt) <= new Date()).length} overdue
-              </span>
-            </div>
-            {followUps.length === 0 ? (
-              <div className="empty-state"><Calendar size={28} style={{ opacity: 0.4 }} /><p>No follow-ups scheduled</p></div>
-            ) : (
-              followUps.slice(0, 10).map((fu) => {
-                const isOverdue = new Date(fu.scheduledAt) <= new Date();
-                return (
-                  <div key={fu.id} className="followup-row">
+          {/* SIDEBAR: RECENT ACTIVITY & FOLLOW-UPS */}
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
+            {/* RECENT ACTIVITY */}
+            <div className="card">
+              <div className="card-header">
+                <h2 className="card-title">Recent Activity</h2>
+              </div>
+              {recentCalls.length === 0 ? (
+                <div className="empty-state"><RefreshCw size={28} style={{ opacity: 0.4 }} /><p>No recent activity</p></div>
+              ) : (
+                recentCalls.map((rc) => (
+                  <div key={rc.id} className="followup-row">
                     <div style={{ flex: 1 }}>
-                      <div style={{ fontWeight: 600, fontSize: '0.875rem', color: 'var(--text-primary)' }}>{fu.lead.name || 'Unknown'}</div>
-                      <div style={{ fontSize: '0.75rem', color: isOverdue ? '#ef4444' : 'var(--text-muted)' }}>
-                        {isOverdue ? '⚠ Overdue — ' : '⏰ '}
-                        {new Date(fu.scheduledAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                      <div style={{ fontWeight: 600, fontSize: '0.875rem', color: 'var(--text-primary)' }}>{rc.lead.name || 'Unknown'}</div>
+                      <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>
+                        {rc.dispositionTag} · {new Date(rc.calledAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
                       </div>
                     </div>
-                    <div style={{ display: 'flex', gap: 4 }}>
-                      <button className="btn-icon" title="Load lead" onClick={() => {
-                        setActiveLead({ id: fu.leadId, name: fu.lead.name, phoneMasked: '****' + fu.lead.phone.slice(-4), email: null, status: 'callback', priority: 'high', isDnd: false });
-                      }}>
-                        <ChevronRight size={15} />
-                      </button>
-                      <button className="btn-icon" title="Mark done" onClick={() => followUpDoneMutation.mutate(fu.id)}>
-                        <CheckCircle size={15} style={{ color: '#22c55e' }} />
-                      </button>
-                    </div>
+                    <button className="btn-icon" title="Call again" onClick={() => {
+                      setActiveLead(rc.lead);
+                      setShowDisposition(false);
+                    }}>
+                      <Phone size={14} />
+                    </button>
                   </div>
-                );
-              })
-            )}
+                ))
+              )}
+            </div>
+
+            {/* FOLLOW-UPS */}
+            <div className="card">
+              <div className="card-header">
+                <h2 className="card-title">Today's Follow-ups</h2>
+                <span className="badge" style={{ background: '#1e293b', color: '#a78bfa' }}>
+                  {followUps.length} pending
+                </span>
+              </div>
+              {followUps.length === 0 ? (
+                <div className="empty-state"><Calendar size={28} style={{ opacity: 0.4 }} /><p>No follow-ups scheduled</p></div>
+              ) : (
+                followUps.map((fu) => {
+                  const isOverdue = new Date(fu.scheduledAt) <= new Date();
+                  return (
+                    <div key={fu.id} className="followup-row">
+                      <div style={{ flex: 1 }}>
+                        <div style={{ fontWeight: 600, fontSize: '0.875rem', color: 'var(--text-primary)' }}>{fu.lead.name || 'Unknown'}</div>
+                        <div style={{ fontSize: '0.75rem', color: isOverdue ? '#ef4444' : 'var(--text-muted)' }}>
+                          {isOverdue ? '⚠ Overdue — ' : '⏰ '}
+                          {new Date(fu.scheduledAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                        </div>
+                      </div>
+                      <div style={{ display: 'flex', gap: 4 }}>
+                        <button className="btn-icon" title="Load lead" onClick={() => {
+                          setActiveLead(fu.lead);
+                          setShowDisposition(false);
+                        }}>
+                          <ChevronRight size={15} />
+                        </button>
+                        <button className="btn-icon" title="Mark done" onClick={() => followUpDoneMutation.mutate(fu.id)}>
+                          <CheckCircle size={15} style={{ color: '#22c55e' }} />
+                        </button>
+                      </div>
+                    </div>
+                  );
+                })
+              )}
+            </div>
           </div>
         </div>
 
@@ -399,10 +516,16 @@ export default function AgentWorkspace() {
           <div className="card">
             <div className="card-header">
               <h2 className="card-title">Today's Dispositions</h2>
+              <p style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>Click a row to see leads</p>
             </div>
             <div className="card-body">
-              {(dashData.data.data.tagStats as { tag: string; count: number }[]).map((t) => (
-                <div key={t.tag} className="disposition-row">
+              {(dashData?.data?.data?.tagStats as { tag: string; count: number }[] || []).map((t) => (
+                <div
+                  key={t.tag}
+                  className="disposition-row clickable-row"
+                  onClick={() => setSelectedTagForList(t.tag)}
+                  style={{ cursor: 'pointer' }}
+                >
                   <span className="disposition-tag">{t.tag}</span>
                   <div className="disposition-bar-wrap">
                     <div className="disposition-bar" style={{ width: `${Math.min(100, (t.count / (stats?.callsToday || 1)) * 100)}%` }} />
@@ -412,6 +535,18 @@ export default function AgentWorkspace() {
               ))}
             </div>
           </div>
+        )}
+
+        {/* Disposition Detail Modal */}
+        {selectedTagForList && (
+          <DispositionLeadsModal
+            tag={selectedTagForList}
+            onClose={() => setSelectedTagForList(null)}
+            onLoadLead={(lead) => {
+              setActiveLead(lead);
+              setShowDisposition(false);
+            }}
+          />
         )}
       </div>
     </AppLayout>

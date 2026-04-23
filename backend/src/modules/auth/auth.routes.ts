@@ -45,6 +45,12 @@ router.post('/login', async (req: Request, res: Response, next: NextFunction) =>
       throw new AppError(401, 'INVALID_CREDENTIALS', 'Invalid email or password');
     }
 
+    // Auto-set status to active on login if they are not inactive
+    if (user.status === 'offline') {
+      await prisma.user.update({ where: { id: user.id }, data: { status: 'active' } });
+      user.status = 'active';
+    }
+
     const payload = { userId: user.id, role: user.role, email: user.email };
     const accessToken = signAccessToken(payload);
     const refreshToken = signRefreshToken(payload);
@@ -63,6 +69,7 @@ router.post('/login', async (req: Request, res: Response, next: NextFunction) =>
           email: user.email,
           role: user.role,
           teamId: user.teamId,
+          status: user.status,
         },
       },
     });
@@ -92,8 +99,9 @@ router.post('/refresh', async (req: Request, res: Response, next: NextFunction) 
     // Rotate tokens — revoke old, issue new
     await revokeRefreshToken(payload.userId, refreshToken);
 
-    const newAccessToken = signAccessToken(payload);
-    const newRefreshToken = signRefreshToken(payload);
+    const newPayload = { userId: payload.userId, role: payload.role, email: payload.email };
+    const newAccessToken = signAccessToken(newPayload);
+    const newRefreshToken = signRefreshToken(newPayload);
     await storeRefreshToken(payload.userId, newRefreshToken, getRefreshTokenTtlSeconds());
 
     res.json({
@@ -112,6 +120,23 @@ router.post('/logout', authenticate, async (req: Request, res: Response, next: N
     const { refreshToken } = refreshSchema.parse(req.body);
     if (req.user) {
       await revokeRefreshToken(req.user.userId, refreshToken);
+      
+      const u = await prisma.user.findUnique({ where: { id: req.user.userId } });
+      if (u) {
+        if (u.status === 'on_break') {
+          const openBreak = await prisma.breakLog.findFirst({
+            where: { agentId: req.user.userId, endedAt: null },
+            orderBy: { startedAt: 'desc' }
+          });
+          if (openBreak) {
+            await prisma.breakLog.update({ where: { id: openBreak.id }, data: { endedAt: new Date() } });
+          }
+        }
+        await prisma.user.update({
+          where: { id: req.user.userId },
+          data: { status: 'offline', breakStartedAt: null }
+        });
+      }
     }
     res.json({ success: true, data: { message: 'Logged out successfully' } });
   } catch (err) {

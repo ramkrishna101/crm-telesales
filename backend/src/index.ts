@@ -2,6 +2,7 @@ import 'dotenv/config';
 import express from 'express';
 import cors from 'cors';
 import helmet from 'helmet';
+import path from 'path';
 import { createServer } from 'http';
 import { Server as SocketServer } from 'socket.io';
 import rateLimit from 'express-rate-limit';
@@ -105,10 +106,19 @@ app.use('/api/follow-ups', followUpsRoutes);
 app.use('/api/agent', agentRoutes);
 // TODO (Task 2.x): app.use('/api/analytics', analyticsRoutes);
 
-// ── 404 Handler ───────────────────────────────────────────────────────
-app.use((_req, res) => {
-  res.status(404).json({ success: false, error: { code: 'NOT_FOUND', message: 'Route not found' } });
-});
+// ── Static Frontend Serving (Unified Deployment) ───────────────────────
+if (process.env.NODE_ENV === 'production') {
+  const frontendDistPath = path.join(__dirname, '../../frontend/dist');
+  app.use(express.static(frontendDistPath));
+  app.get('*', (req, res) => {
+    res.sendFile(path.join(frontendDistPath, 'index.html'));
+  });
+} else {
+  // ── 404 Handler (API only in dev) ──────────────────────────────────
+  app.use((_req, res) => {
+    res.status(404).json({ success: false, error: { code: 'NOT_FOUND', message: 'Route not found' } });
+  });
+}
 
 // ── Error Handler (must be last) ─────────────────────────────────────
 app.use(errorHandler as express.ErrorRequestHandler);

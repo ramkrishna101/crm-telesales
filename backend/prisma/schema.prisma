@@ -22,6 +22,7 @@ enum UserStatus {
   active
   inactive
   on_break
+  offline
 }
 
 enum CampaignType {
@@ -80,7 +81,7 @@ model User {
   role           Role
   team           Team?      @relation("TeamMembers", fields: [teamId], references: [id])
   teamId         String?
-  status         UserStatus @default(active)
+  status         UserStatus @default(offline)
   breakStartedAt DateTime?
   createdAt      DateTime   @default(now())
   updatedAt      DateTime   @updatedAt
@@ -96,6 +97,7 @@ model User {
   followUps         FollowUp[]
   createdTags       DispositionTag[]
   breakLogs         BreakLog[]
+  comments          LeadComment[]
 
   @@map("users")
 }
@@ -139,7 +141,7 @@ model Lead {
   id           String     @id @default(uuid())
   campaign     Campaign   @relation(fields: [campaignId], references: [id])
   campaignId   String
-  phone        String     // Stored plain; masking happens at API layer
+  phone        String     @unique // Stored plain; masking happens at API layer
   email        String?
   name         String?
   customFields Json?      // Extra CSV columns stored as JSONB
@@ -154,12 +156,26 @@ model Lead {
   // Relations
   callLogs  CallLog[]
   followUps FollowUp[]
+  comments  LeadComment[]
 
   // Indexes
   @@index([assignedToId])
   @@index([campaignId, status])
   @@index([campaignId, assignedToId])
   @@map("leads")
+}
+
+model LeadComment {
+  id        String   @id @default(uuid())
+  lead      Lead     @relation(fields: [leadId], references: [id])
+  leadId    String
+  agent     User     @relation(fields: [agentId], references: [id])
+  agentId   String
+  content   String
+  createdAt DateTime @default(now())
+
+  @@index([leadId])
+  @@map("lead_comments")
 }
 
 model CallLog {

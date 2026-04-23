@@ -50,7 +50,7 @@ router.get('/dashboard', requireRole('agent'), async (req: Request, res: Respons
         where: { agentId, calledAt: { gte: todayStart } },
         orderBy: { calledAt: 'desc' },
         take: 5,
-        include: { lead: { select: { id: true, name: true } } },
+        include: { lead: { select: { id: true, name: true, phone: true, status: true, priority: true } } },
       }),
       // Calls by tag today
       prisma.callLog.groupBy({
@@ -71,8 +71,8 @@ router.get('/dashboard', requireRole('agent'), async (req: Request, res: Respons
           isOnBreak: !!activeBreak,
           breakStartedAt: activeBreak?.startedAt || null,
         },
-        followUpsToday,
-        recentCalls,
+        followUpsToday: followUpsToday.map(f => ({ ...f, lead: maskPhone(f.lead) })),
+        recentCalls: recentCalls.map(c => ({ ...c, lead: maskPhone(c.lead) })),
         tagStats: tagStats.map((t) => ({ tag: t.dispositionTag, count: t._count.dispositionTag })),
       },
     });
@@ -217,7 +217,7 @@ router.post('/call/initiate', requireRole('agent'), async (req: Request, res: Re
         data: {
           provider: 'stub',
           callRef: `STUB-${Date.now()}`,
-          phone: `****${lead.phone.slice(-4)}`,
+          phone: lead.phone,
           message: 'Stub call initiated (integrate real provider in production)',
         },
       });
@@ -256,8 +256,9 @@ router.get('/break-history', requireRole('agent'), async (req: Request, res: Res
 
 // ── Helpers ───────────────────────────────────────────────────────────
 
-function maskPhone<T extends { phone: string }>(lead: T): T & { phoneMasked: string } {
-  return { ...lead, phone: lead.phone, phoneMasked: `****${lead.phone.slice(-4)}` };
+function maskPhone<T extends { phone: string }>(lead: T): any {
+  const { phone, ...rest } = lead;
+  return { ...rest, phoneMasked: `****${phone.slice(-4)}` };
 }
 
 export default router;

@@ -1,5 +1,6 @@
 import { Routes, Route, Navigate } from 'react-router-dom';
 import { ProtectedRoute, RoleRoute } from './guards';
+import { useAuthStore } from '../store/authStore';
 import LoginPage from '../pages/auth/LoginPage';
 import UnauthorizedPage from '../pages/auth/UnauthorizedPage';
 
@@ -17,8 +18,20 @@ import SupervisorDashboard from '../pages/supervisor/SupervisorDashboard';
 
 // Agent
 import AgentDashboard from '../pages/agent/AgentDashboard';
+import AgentLeadsPage from '../pages/agent/AgentLeadsPage';
+import AgentFollowUpsPage from '../pages/agent/AgentFollowUpsPage';
 
 export default function AppRouter() {
+  const { _hasHydrated } = useAuthStore();
+
+  if (!_hasHydrated) {
+    return (
+      <div style={{ height: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'var(--bg-main)' }}>
+        <div className="loader" style={{ width: 40, height: 40, border: '3px solid var(--accent)', borderTopColor: 'transparent', borderRadius: '50%', animation: 'spin 1s linear infinite' }}></div>
+      </div>
+    );
+  }
+
   return (
     <Routes>
       {/* Public */}
@@ -47,6 +60,8 @@ export default function AppRouter() {
       {/* ── Agent ────────────────────────────────────────────────────── */}
       <Route element={<RoleRoute allowedRoles={['agent']} />}>
         <Route path="/agent" element={<AgentDashboard />} />
+        <Route path="/agent/leads" element={<AgentLeadsPage />} />
+        <Route path="/agent/follow-ups" element={<AgentFollowUpsPage />} />
         <Route path="/agent/*" element={<AgentDashboard />} />
       </Route>
 

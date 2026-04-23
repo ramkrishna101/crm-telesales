@@ -149,25 +149,64 @@ router.put('/:id', requireRole('admin', 'supervisor'), async (req: Request, res:
       }
     }
 
-    const campaign = await prisma.campaign.update({
-      where: { id },
-      data: {
-        ...(body.name && { name: body.name }),
-        ...(body.description !== undefined && { description: body.description }),
-        ...(body.status && {
-          status: body.status,
-          ...(body.status === 'closed' && { closedAt: new Date() }),
-        }),
-        ...(body.priority && { priority: body.priority }),
-        ...(body.teamId !== undefined && { teamId: body.teamId }),
-        ...(body.script !== undefined && { script: body.script }),
-      },
-      include: {
-        createdBy: { select: { id: true, name: true } },
-        team: { select: { id: true, name: true } },
-        _count: { select: { leads: true, agents: true } },
-      },
+    // Handle Team Reassignment Logic
+    let newAgentsToAssign: string[] = [];
+    const isChangingTeam = body.teamId !== undefined && body.teamId !== existing.teamId;
+
+    if (isChangingTeam && body.teamId) {
+      // Get all users in the new team
+      const newTeamMembers = await prisma.user.findMany({
+        where: { teamId: body.teamId },
+        select: { id: true }
+      });
+      newAgentsToAssign = newTeamMembers.map(u => u.id);
+    }
+
+    const campaign = await prisma.$transaction(async (tx) => {
+      // 1. Update the campaign itself
+      const updated = await tx.campaign.update({
+        where: { id },
+        data: {
+          ...(body.name && { name: body.name }),
+          ...(body.description !== undefined && { description: body.description }),
+          ...(body.status && {
+            status: body.status,
+            ...(body.status === 'closed' && { closedAt: new Date() }),
+          }),
+          ...(body.priority && { priority: body.priority }),
+          ...(body.teamId !== undefined && { teamId: body.teamId }),
+          ...(body.script !== undefined && { script: body.script }),
+        },
+        include: {
+          createdBy: { select: { id: true, name: true } },
+          team: { select: { id: true, name: true } },
+          _count: { select: { leads: true, agents: true } },
+        },
+      });
+
+      // 2. If team changed, handle access and lead reassignment
+      if (isChangingTeam) {
+        // Clear all existing agent access
+        await tx.campaignAgent.deleteMany({ where: { campaignId: id } });
+        
+        // Grant access to new team
+        if (newAgentsToAssign.length > 0) {
+          await tx.campaignAgent.createMany({
+            data: newAgentsToAssign.map(agentId => ({ campaignId: id, agentId }))
+          });
+        }
+
+        // Unassign all leads in this campaign so they go back to the pool
+        // Alternatively, we could redistribute, but unassigning is safer
+        await tx.lead.updateMany({
+          where: { campaignId: id },
+          data: { assignedToId: null }
+        });
+      }
+
+      return updated;
     });
+
     res.json({ success: true, data: campaign });
   } catch (err) {
     next(err);
@@ -229,9 +268,21 @@ router.get('/:id/stats', requireRole('admin', 'supervisor'), async (req: Request
           AND cl."calledAt" >= NOW() - INTERVAL '7 days'
         GROUP BY DATE(cl."calledAt") ORDER BY date ASC
       `,
-      prisma.$queryRaw<Array<{ agentId: string; name: string; calls: bigint; connected: bigint }>>`
-        SELECT u.id as "agentId", u.name, COUNT(cl.id) as calls,
-               COUNT(CASE WHEN cl."durationSeconds" > 0 THEN 1 END) as connected
+      prisma.$queryRaw<Array<{ 
+        agentId: string; name: string; calls: bigint; connected: bigint;
+        interested: bigint; notInterested: bigint; callback: bigint; 
+        dnd: bigint; invalid: bigint; busy: bigint; rnr: bigint;
+      }>>`
+        SELECT u.id as "agentId", u.name, 
+               COUNT(cl.id) as calls,
+               COUNT(CASE WHEN cl."durationSeconds" > 0 THEN 1 END) as connected,
+               SUM(CASE WHEN cl."dispositionTag" = 'Interested' THEN 1 ELSE 0 END) as interested,
+               SUM(CASE WHEN cl."dispositionTag" = 'Not Interested' THEN 1 ELSE 0 END) as "notInterested",
+               SUM(CASE WHEN cl."dispositionTag" = 'Callback' THEN 1 ELSE 0 END) as callback,
+               SUM(CASE WHEN cl."dispositionTag" = 'DND' THEN 1 ELSE 0 END) as dnd,
+               SUM(CASE WHEN cl."dispositionTag" = 'Invalid Number' THEN 1 ELSE 0 END) as invalid,
+               SUM(CASE WHEN cl."dispositionTag" = 'Busy' THEN 1 ELSE 0 END) as busy,
+               SUM(CASE WHEN cl."dispositionTag" = 'RNR' THEN 1 ELSE 0 END) as rnr
         FROM users u JOIN call_logs cl ON cl."agentId" = u.id
         JOIN leads l ON cl."leadId" = l.id
         WHERE l."campaignId" = ${campaignId}
@@ -240,15 +291,31 @@ router.get('/:id/stats', requireRole('admin', 'supervisor'), async (req: Request
     ]);
 
     const leadsMap = Object.fromEntries(leadsByStatus.map((s) => [s.status, s._count.status]));
+    const totalContacted = totalLeads - (leadsMap['uncontacted'] || 0);
+    const conversionRate = totalContacted > 0 
+      ? (((leadsMap['lead'] || 0) / totalContacted) * 100).toFixed(1) + '%' 
+      : '0%';
+
     res.json({
       success: true,
       data: {
-        campaignId, totalLeads, leadsByStatus: leadsMap, totalCalls,
-        conversionRate: totalLeads > 0 ? (((leadsMap['lead'] || 0) / totalLeads) * 100).toFixed(1) + '%' : '0%',
+        campaignId, 
+        totalLeads, 
+        totalContacted,
+        leadsByStatus: leadsMap, 
+        totalCalls,
+        conversionRate,
         callsByDay: callsByDay.map((r) => ({ date: r.date, count: Number(r.count) })),
         agentPerformance: agentPerformance.map((r) => ({
           agentId: r.agentId, name: r.name,
           calls: Number(r.calls), connected: Number(r.connected),
+          interested: Number(r.interested || 0),
+          notInterested: Number(r.notInterested || 0),
+          callback: Number(r.callback || 0),
+          dnd: Number(r.dnd || 0),
+          invalid: Number(r.invalid || 0),
+          busy: Number(r.busy || 0),
+          rnr: Number(r.rnr || 0)
         })),
       },
     });

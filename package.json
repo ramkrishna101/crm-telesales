@@ -7,12 +7,17 @@
     "dev": "concurrently \"npm run dev:backend\" \"npm run dev:frontend\"",
     "dev:backend": "cd backend && npm run dev",
     "dev:frontend": "cd frontend && npm run dev",
+    "build": "npm run build:backend && npm run build:frontend",
+    "build:backend": "cd backend && npm run build",
+    "build:frontend": "cd frontend && npm run build",
+    "postinstall": "cd backend && npx prisma generate",
+    "start": "cd backend && npx prisma migrate deploy && npm start",
     "db:up": "docker-compose up -d",
     "db:down": "docker-compose down",
-    "db:migrate": "cd backend && npx prisma migrate dev",
+    "db:migrate": "cd backend && npx prisma migrate deploy",
     "db:seed": "cd backend && npx prisma db seed",
     "db:studio": "cd backend && npx prisma studio",
-    "setup": "npm run db:up && cd backend && npm install && npx prisma migrate dev && npx prisma db seed"
+    "setup": "npm run db:up && cd backend && npm install && npm run db:migrate && npm run db:seed"
   },
   "devDependencies": {
     "concurrently": "^9.1.2"

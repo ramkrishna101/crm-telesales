@@ -69,7 +69,7 @@ function MembersPanel({ team, agents, onAddMembers, onRemoveMembers }: {
   onAddMembers: (ids: string[]) => void; onRemoveMembers: (ids: string[]) => void;
 }) {
   const [addId, setAddId] = useState('');
-  const unassignedAgents = agents.filter(a => !team.members.find(m => m.id === a.id) && a.role === 'agent');
+  const unassignedAgents = agents.filter(a => !(team.members || []).find(m => m.id === a.id) && a.role === 'agent');
 
   return (
     <div className="members-panel">
@@ -79,7 +79,7 @@ function MembersPanel({ team, agents, onAddMembers, onRemoveMembers }: {
       </div>
       {/* Current members */}
       <div style={{ marginBottom: 12 }}>
-        {team.members.map(m => (
+        {team.members?.map(m => (
           <div key={m.id} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '6px 0', borderBottom: '1px solid var(--border)' }}>
             <div className="avatar avatar--sm">{m.name.charAt(0)}</div>
             <span style={{ flex: 1, fontSize: '0.85rem', color: 'var(--text-primary)' }}>{m.name}</span>
@@ -89,7 +89,7 @@ function MembersPanel({ team, agents, onAddMembers, onRemoveMembers }: {
             </button>
           </div>
         ))}
-        {team.members.length === 0 && <p style={{ color: 'var(--text-muted)', fontSize: '0.82rem', padding: '8px 0' }}>No members yet</p>}
+        {(!team.members || team.members.length === 0) && <p style={{ color: 'var(--text-muted)', fontSize: '0.82rem', padding: '8px 0' }}>No members yet</p>}
       </div>
       {/* Add member */}
       {unassignedAgents.length > 0 && (

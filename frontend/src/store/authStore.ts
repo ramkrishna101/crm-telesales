@@ -11,6 +11,7 @@ export interface AuthUser {
   email: string;
   role: Role;
   teamId: string | null;
+  status?: 'active' | 'inactive' | 'on_break' | 'offline';
 }
 
 interface AuthState {
@@ -18,8 +19,11 @@ interface AuthState {
   accessToken: string | null;
   refreshToken: string | null;
   isAuthenticated: boolean;
+  _hasHydrated: boolean;
+  setHasHydrated: (val: boolean) => void;
   setAuth: (user: AuthUser, accessToken: string, refreshToken: string) => void;
   setTokens: (accessToken: string, refreshToken: string) => void;
+  updateUser: (data: Partial<AuthUser>) => void;
   logout: () => void;
 }
 
@@ -30,21 +34,31 @@ export const useAuthStore = create<AuthState>()(
       accessToken: null,
       refreshToken: null,
       isAuthenticated: false,
+      _hasHydrated: false,
+
+      setHasHydrated: (val) => set({ _hasHydrated: val }),
 
       setAuth: (user, accessToken, refreshToken) =>
         set({ user, accessToken, refreshToken, isAuthenticated: true }),
 
       setTokens: (accessToken, refreshToken) =>
         set({ accessToken, refreshToken }),
+        
+      updateUser: (data) =>
+        set((state) => ({ user: state.user ? { ...state.user, ...data } : null })),
 
       logout: () =>
         set({ user: null, accessToken: null, refreshToken: null, isAuthenticated: false }),
     }),
     {
       name: 'crm-auth',
-      // Only persist the refresh token and user — accessToken is short-lived
+      onRehydrateStorage: () => (state) => {
+        state?.setHasHydrated(true);
+      },
+      // Persist everything for seamless refresh
       partialize: (state) => ({
         user: state.user,
+        accessToken: state.accessToken,
         refreshToken: state.refreshToken,
         isAuthenticated: state.isAuthenticated,
       }),

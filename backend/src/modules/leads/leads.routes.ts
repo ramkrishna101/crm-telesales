@@ -108,7 +108,9 @@ router.get('/', async (req: Request, res: Response, next: NextFunction) => {
     if (campaignId) where.campaignId = campaignId;
     if (status) where.status = status;
     if (priority) where.priority = priority;
-    if (assignedToId && callerRole !== 'agent') where.assignedToId = assignedToId;
+    if (assignedToId && callerRole !== 'agent') {
+      where.assignedToId = assignedToId === 'null' ? null : assignedToId;
+    }
 
     const [leads, total] = await Promise.all([
       prisma.lead.findMany({
@@ -127,6 +129,7 @@ router.get('/', async (req: Request, res: Response, next: NextFunction) => {
           isDnd: true,
           lastCalledAt: true,
           campaignId: true,
+          campaign: { select: { name: true } },
           assignedToId: true,
           createdAt: true,
           assignedTo: { select: { id: true, name: true } },
@@ -169,6 +172,10 @@ router.get('/:id', async (req: Request, res: Response, next: NextFunction) => {
         followUps: {
           where: { status: 'pending' },
           orderBy: { scheduledAt: 'asc' },
+        },
+        comments: {
+          orderBy: { createdAt: 'desc' },
+          include: { agent: { select: { id: true, name: true } } },
         },
       },
     });
@@ -295,6 +302,32 @@ router.put('/:id/status', async (req: Request, res: Response, next: NextFunction
 
     const updated = await prisma.lead.update({ where: { id }, data: updates });
     res.json({ success: true, data: updated });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// ── POST /api/leads/:id/comments ───────────────────────────────────────
+// Add internal note to lead
+router.post('/:id/comments', async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const id = param(req, 'id');
+    const { content } = z.object({ content: z.string().min(1).max(2000) }).parse(req.body);
+    const agentId = req.user!.userId;
+
+    const lead = await prisma.lead.findUnique({ where: { id } });
+    if (!lead) throw new AppError(404, 'LEAD_NOT_FOUND', 'Lead not found');
+
+    if (req.user!.role === 'agent' && lead.assignedToId !== agentId) {
+      throw new AppError(403, 'FORBIDDEN', 'This lead is not assigned to you');
+    }
+
+    const comment = await prisma.leadComment.create({
+      data: { leadId: id, agentId, content },
+      include: { agent: { select: { id: true, name: true } } },
+    });
+
+    res.status(201).json({ success: true, data: comment });
   } catch (err) {
     next(err);
   }

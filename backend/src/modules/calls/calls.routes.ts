@@ -1,6 +1,7 @@
 import { Router, Request, Response, NextFunction } from 'express';
 import { z } from 'zod';
 import { prisma } from '../../lib/prisma';
+import { Prisma } from '@prisma/client';
 import { authenticate, requireRole } from '../../middleware/auth';
 import { AppError } from '../../middleware/errorHandler';
 import { param } from '../../lib/params';
@@ -78,6 +79,11 @@ router.post('/', async (req: Request, res: Response, next: NextFunction) => {
           ...(newStatus === 'dnd' && { isDnd: true }),
         },
       }),
+      // Auto-complete pending follow-ups for this lead
+      prisma.followUp.updateMany({
+        where: { leadId: body.leadId, agentId, status: 'pending' },
+        data: { status: 'done' },
+      }),
     ]);
 
     // Add to DND blocklist if needed
@@ -102,7 +108,7 @@ router.get('/', async (req: Request, res: Response, next: NextFunction) => {
   try {
     const { role: callerRole, userId } = req.user!;
     const {
-      page = '1', limit = '50', agentId, campaignId,
+      page = '1', limit = '50', agentId, leadId, campaignId,
       from, to, tag,
     } = req.query as Record<string, string>;
     const skip = (parseInt(page) - 1) * parseInt(limit);
@@ -125,6 +131,7 @@ router.get('/', async (req: Request, res: Response, next: NextFunction) => {
     }
 
     if (agentId && callerRole !== 'agent') where.agentId = agentId;
+    if (leadId) where.leadId = leadId;
     if (tag) where.dispositionTag = tag;
     if (dateFilter) where.calledAt = dateFilter;
     if (campaignId) where.lead = { campaignId };
@@ -137,13 +144,22 @@ router.get('/', async (req: Request, res: Response, next: NextFunction) => {
         orderBy: { calledAt: 'desc' },
         include: {
           agent: { select: { id: true, name: true } },
-          lead: { select: { id: true, name: true, campaignId: true } },
+          lead: { select: { id: true, name: true, phone: true, campaignId: true, status: true, priority: true } },
         },
       }),
       prisma.callLog.count({ where }),
     ]);
 
-    res.json({ success: true, data: { logs, total, page: parseInt(page), limit: parseInt(limit) } });
+    const maskedLogs = logs.map(l => ({
+      ...l,
+      lead: {
+        ...l.lead,
+        phoneMasked: `****${l.lead.phone.slice(-4)}`,
+        phone: undefined
+      }
+    }));
+
+    res.json({ success: true, data: { logs: maskedLogs, total, page: parseInt(page), limit: parseInt(limit) } });
   } catch (err) {
     next(err);
   }
@@ -156,9 +172,15 @@ router.get('/summary', requireRole('admin', 'supervisor'), async (req: Request, 
   try {
     const { from, to, agentId, campaignId } = req.query as Record<string, string>;
 
-    const dateFilter = from && to ? { gte: new Date(from), lte: new Date(to) } : {
-      gte: new Date(Date.now() - 7 * 24 * 60 * 60 * 1000),
-    };
+    let dateFilter: Record<string, Date> | undefined;
+    if (from && to) {
+      // Parse dates assuming the input is meant to be in IST (+05:30)
+      const gte = new Date(`${from}T00:00:00+05:30`);
+      const lte = new Date(`${to}T23:59:59.999+05:30`);
+      dateFilter = { gte, lte };
+    } else {
+      dateFilter = { gte: new Date(Date.now() - 7 * 24 * 60 * 60 * 1000) };
+    }
 
     const whereClause = {
       calledAt: dateFilter,
@@ -175,32 +197,53 @@ router.get('/summary', requireRole('admin', 'supervisor'), async (req: Request, 
         orderBy: { _count: { dispositionTag: 'desc' } },
       }),
 
-      // Heatmap: calls by hour of day
-      prisma.$queryRaw<Array<{ hour: number; count: bigint }>>`
-        SELECT EXTRACT(HOUR FROM "calledAt") as hour, COUNT(*) as count
-        FROM call_logs
-        WHERE "calledAt" >= ${dateFilter.gte} AND "calledAt" <= ${dateFilter.lte ?? new Date()}
-        ${agentId ? prisma.$queryRaw`AND "agentId" = ${agentId}` : prisma.$queryRaw``}
-        GROUP BY EXTRACT(HOUR FROM "calledAt")
-        ORDER BY hour
-      `,
+      // Heatmap: calls by hour of day (converted to IST)
+      agentId
+        ? prisma.$queryRaw<Array<{ hour: number; count: bigint }>>`
+            SELECT EXTRACT(HOUR FROM "calledAt" AT TIME ZONE 'UTC' AT TIME ZONE 'Asia/Kolkata') as hour, COUNT(*) as count
+            FROM call_logs
+            WHERE "calledAt" >= ${dateFilter.gte} AND "calledAt" <= ${dateFilter.lte ?? new Date()}
+            AND "agentId" = ${agentId}
+            GROUP BY EXTRACT(HOUR FROM "calledAt" AT TIME ZONE 'UTC' AT TIME ZONE 'Asia/Kolkata')
+            ORDER BY hour
+          `
+        : prisma.$queryRaw<Array<{ hour: number; count: bigint }>>`
+            SELECT EXTRACT(HOUR FROM "calledAt" AT TIME ZONE 'UTC' AT TIME ZONE 'Asia/Kolkata') as hour, COUNT(*) as count
+            FROM call_logs
+            WHERE "calledAt" >= ${dateFilter.gte} AND "calledAt" <= ${dateFilter.lte ?? new Date()}
+            GROUP BY EXTRACT(HOUR FROM "calledAt" AT TIME ZONE 'UTC' AT TIME ZONE 'Asia/Kolkata')
+            ORDER BY hour
+          `,
 
-      // Daily call volume
+      // Daily call volume (converted to IST)
       prisma.$queryRaw<Array<{ date: string; count: bigint; avgDuration: number }>>`
-        SELECT DATE("calledAt") as date, COUNT(*) as count,
+        SELECT DATE("calledAt" AT TIME ZONE 'UTC' AT TIME ZONE 'Asia/Kolkata') as date, COUNT(*) as count,
                ROUND(AVG("durationSeconds")) as "avgDuration"
         FROM call_logs
         WHERE "calledAt" >= ${dateFilter.gte}
-        GROUP BY DATE("calledAt") ORDER BY date
+        GROUP BY DATE("calledAt" AT TIME ZONE 'UTC' AT TIME ZONE 'Asia/Kolkata') ORDER BY date
       `,
 
-      // Agent leaderboard
-      prisma.$queryRaw<Array<{ agentId: string; name: string; calls: bigint; connected: bigint; avgDuration: number }>>`
-        SELECT u.id as "agentId", u.name, COUNT(cl.id) as calls,
-               COUNT(CASE WHEN cl."durationSeconds" > 0 THEN 1 END) as connected,
-               ROUND(AVG(cl."durationSeconds")) as "avgDuration"
+      // Agent leaderboard with disposition breakdown
+      prisma.$queryRaw<Array<{ 
+        agentId: string; name: string; calls: bigint; connected: bigint; avgDuration: number;
+        interested: bigint; callback: bigint; notInterested: bigint; rnr: bigint; busy: bigint; dnd: bigint; invalid: bigint;
+      }>>`
+        SELECT 
+          u.id as "agentId", 
+          u.name, 
+          COUNT(cl.id) as calls,
+          COUNT(CASE WHEN cl."durationSeconds" > 0 THEN 1 END) as connected,
+          SUM(CASE WHEN cl."dispositionTag" = 'Interested' THEN 1 ELSE 0 END) as interested,
+          SUM(CASE WHEN cl."dispositionTag" = 'Callback' THEN 1 ELSE 0 END) as callback,
+          SUM(CASE WHEN cl."dispositionTag" = 'Not Interested' THEN 1 ELSE 0 END) as "notInterested",
+          SUM(CASE WHEN cl."dispositionTag" = 'RNR' THEN 1 ELSE 0 END) as rnr,
+          SUM(CASE WHEN cl."dispositionTag" = 'Busy' THEN 1 ELSE 0 END) as busy,
+          SUM(CASE WHEN cl."dispositionTag" = 'DND' THEN 1 ELSE 0 END) as dnd,
+          SUM(CASE WHEN cl."dispositionTag" = 'Invalid Number' THEN 1 ELSE 0 END) as invalid,
+          ROUND(AVG(cl."durationSeconds")) as "avgDuration"
         FROM users u JOIN call_logs cl ON cl."agentId" = u.id
-        WHERE cl."calledAt" >= ${dateFilter.gte}
+        WHERE cl."calledAt" >= ${dateFilter.gte} ${dateFilter.lte ? Prisma.sql`AND cl."calledAt" <= ${dateFilter.lte}` : Prisma.empty}
         GROUP BY u.id, u.name ORDER BY calls DESC LIMIT 20
       `,
     ]);
@@ -216,6 +259,8 @@ router.get('/summary', requireRole('admin', 'supervisor'), async (req: Request, 
         agentLeaderboard: agentLeaderboard.map((a) => ({
           agentId: a.agentId, name: a.name,
           calls: Number(a.calls), connected: Number(a.connected), avgDuration: Number(a.avgDuration),
+          interested: Number(a.interested), callback: Number(a.callback), notInterested: Number(a.notInterested),
+          rnr: Number(a.rnr), busy: Number(a.busy), dnd: Number(a.dnd), invalid: Number(a.invalid),
         })),
       },
     });
