@@ -18,7 +18,7 @@
     "build": "npm run build:backend && npm run build:frontend",
     "build:backend": "npm --prefix backend run build",
     "build:frontend": "npm --prefix frontend run build",
-    "postinstall": "npm --prefix backend run prisma:generate",
+    "postinstall": "PRISMA_CLI_BINARY_TARGETS=debian-openssl-3.0.x npm --prefix backend run prisma:generate",
     "start": "npm --prefix backend run start:prod",
     "db:up": "docker-compose up -d",
     "db:down": "docker-compose down",
