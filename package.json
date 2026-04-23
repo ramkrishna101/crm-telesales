@@ -3,6 +3,10 @@
   "version": "1.0.0",
   "description": "Telesales CRM monorepo",
   "private": true,
+  "engines": {
+    "node": ">=20.0.0",
+    "npm": ">=10.0.0"
+  },
   "workspaces": [
     "frontend",
     "backend"
@@ -12,16 +16,16 @@
     "dev:backend": "cd backend && npm run dev",
     "dev:frontend": "cd frontend && npm run dev",
     "build": "npm run build:backend && npm run build:frontend",
-    "build:backend": "cd backend && npm run build",
-    "build:frontend": "cd frontend && npm run build",
-    "postinstall": "cd backend && npx prisma generate",
-    "start": "cd backend && npx prisma migrate deploy && npm start",
+    "build:backend": "npm --prefix backend run build",
+    "build:frontend": "npm --prefix frontend run build",
+    "postinstall": "npm --prefix backend run prisma:generate",
+    "start": "npm --prefix backend run start:prod",
     "db:up": "docker-compose up -d",
     "db:down": "docker-compose down",
-    "db:migrate": "cd backend && npx prisma migrate deploy",
-    "db:seed": "cd backend && npx prisma db seed",
-    "db:studio": "cd backend && npx prisma studio",
-    "setup": "npm run db:up && cd backend && npm install && npm run db:migrate && npm run db:seed"
+    "db:migrate": "npm --prefix backend run prisma:migrate",
+    "db:seed": "npm --prefix backend run prisma:seed",
+    "db:studio": "npm --prefix backend run prisma:studio",
+    "setup": "npm run db:up && npm --prefix backend install && npm run db:migrate && npm run db:seed"
   },
   "devDependencies": {
     "concurrently": "^9.1.2"
