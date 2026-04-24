@@ -21,8 +21,9 @@ const router = Router();
 // ── Validation Schemas ────────────────────────────────────────────────
 
 const loginSchema = z.object({
-  email: z.string().email(),
-  password: z.string().min(1),
+  email: z.string().email().max(255),
+  // max(128) prevents bcrypt DoS: very long passwords cause excessive CPU during hashing
+  password: z.string().min(1).max(128),
 });
 
 const refreshSchema = z.object({

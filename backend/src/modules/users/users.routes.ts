@@ -13,9 +13,9 @@ router.use(authenticate);
 // ── Schemas ───────────────────────────────────────────────────────────
 
 const createUserSchema = z.object({
-  name: z.string().min(2),
-  email: z.string().email(),
-  password: z.string().min(6),
+  name: z.string().min(2).max(100),
+  email: z.string().email().max(255),
+  password: z.string().min(8).max(128),
   role: z.enum(['admin', 'supervisor', 'agent']),
   teamId: z.string().uuid().optional().nullable(),
 }).refine(data => !(data.role === 'agent' && !data.teamId), {
@@ -24,9 +24,9 @@ const createUserSchema = z.object({
 });
 
 const updateUserSchema = z.object({
-  name: z.string().min(2).optional(),
-  email: z.string().email().optional(),
-  password: z.string().min(6).optional(),
+  name: z.string().min(2).max(100).optional(),
+  email: z.string().email().max(255).optional(),
+  password: z.string().min(8).max(128).optional(),
   role: z.enum(['admin', 'supervisor', 'agent']).optional(),
   teamId: z.string().uuid().optional().nullable(),
   status: z.enum(['active', 'inactive']).optional(),
@@ -162,7 +162,7 @@ router.put('/:id', requireRole('admin'), async (req: Request, res: Response, nex
 router.post('/:id/reset-password', requireRole('admin', 'supervisor'), async (req: Request, res: Response, next: NextFunction) => {
   try {
     const id = param(req, 'id');
-    const { password } = z.object({ password: z.string().min(6) }).parse(req.body);
+    const { password } = z.object({ password: z.string().min(8).max(128) }).parse(req.body);
     const { role: callerRole, userId: callerId } = req.user!;
 
     const targetUser = await prisma.user.findUnique({ where: { id }, include: { team: true } });
@@ -209,7 +209,18 @@ router.delete('/:id', requireRole('admin'), async (req: Request, res: Response, 
 router.get('/:id/stats', requireRole('admin', 'supervisor'), async (req: Request, res: Response, next: NextFunction) => {
   try {
     const agentId = param(req, 'id');
+    const { role: callerRole, userId: callerId } = req.user!;
     const { from, to } = req.query as Record<string, string>;
+
+    // Supervisors may only query stats for agents in their own team (IDOR prevention)
+    if (callerRole === 'supervisor') {
+      const targetUser = await prisma.user.findUnique({ where: { id: agentId }, select: { team: { select: { supervisorId: true } } } });
+      if (!targetUser) throw new AppError(404, 'USER_NOT_FOUND', 'User not found');
+      if (targetUser.team?.supervisorId !== callerId) {
+        throw new AppError(403, 'FORBIDDEN', 'You can only view stats for agents in your team');
+      }
+    }
+
     const dateFilter = from && to ? { gte: new Date(from), lte: new Date(to) } : undefined;
 
     const [totalCalls, totalLeads, followUpsCount] = await Promise.all([
