@@ -11,7 +11,7 @@ export default function AgentFollowUpsPage() {
     queryFn: () => followUpsService.list({ status: 'pending' }),
   });
 
-  const followUps = followUpsData?.data?.data || [];
+  const followUps = followUpsData?.data?.data?.followUps || [];
 
   const handleComplete = async (id: string) => {
     try {
