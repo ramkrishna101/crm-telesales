@@ -35,78 +35,81 @@ function UserModal({
   return (
     <div className="modal-overlay" onClick={onClose}>
       <div className="modal" onClick={(e) => e.stopPropagation()}>
-        <div className="modal-header">
-          <h2 className="modal-title">{isEdit ? 'Edit User' : 'Create User'}</h2>
-          <button className="btn-icon" onClick={onClose}><X size={18} /></button>
-        </div>
-        <div className="modal-body">
-          <div className="form-group">
-            <label className="form-label">Full Name</label>
-            <input className="form-input" value={form.name} onChange={(e) => set('name', e.target.value)} placeholder="John Doe" />
+        <form onSubmit={(e) => {
+          e.preventDefault();
+          if (form.role === 'agent' && !form.teamId) {
+            toast.error('Agents must be assigned to a team/supervisor.');
+            return;
+          }
+          if (!form.name || !form.email) {
+            toast.error('Name and email are required.');
+            return;
+          }
+          onSave({
+            name: form.name, email: form.email, role: form.role,
+            teamId: form.teamId || null, status: form.status,
+            ...(form.password ? { password: form.password } : {}),
+          });
+        }}>
+          <div className="modal-header">
+            <h2 className="modal-title">{isEdit ? 'Edit User' : 'Create User'}</h2>
+            <button type="button" className="btn-icon" onClick={onClose}><X size={18} /></button>
           </div>
-          <div className="form-group">
-            <label className="form-label">Email</label>
-            <input className="form-input" type="email" value={form.email} onChange={(e) => set('email', e.target.value)} placeholder="john@company.com" />
-          </div>
-          {!isEdit && (
+          <div className="modal-body">
             <div className="form-group">
-              <label className="form-label">Password</label>
-              <input className="form-input" type="password" value={form.password} onChange={(e) => set('password', e.target.value)} placeholder="Min. 6 characters" />
+              <label className="form-label">Full Name</label>
+              <input className="form-input" value={form.name} onChange={(e) => set('name', e.target.value)} placeholder="John Doe" />
             </div>
-          )}
-          <div className="form-row">
             <div className="form-group">
-              <label className="form-label">Role</label>
-              <select className="form-input" value={form.role} onChange={(e) => set('role', e.target.value)}>
-                <option value="admin">Admin</option>
-                <option value="supervisor">Supervisor</option>
-                <option value="agent">Agent</option>
-              </select>
+              <label className="form-label">Email</label>
+              <input className="form-input" type="email" value={form.email} onChange={(e) => set('email', e.target.value)} placeholder="john@company.com" />
             </div>
-            {isEdit && (
+            {!isEdit && (
               <div className="form-group">
-                <label className="form-label">Status</label>
-                <select className="form-input" value={form.status} onChange={(e) => set('status', e.target.value)}>
-                  <option value="active">Active</option>
-                  <option value="offline">Offline</option>
-                  <option value="inactive">Inactive</option>
-                </select>
+                <label className="form-label">Password</label>
+                <input className="form-input" type="password" value={form.password} onChange={(e) => set('password', e.target.value)} placeholder="Min. 6 characters" />
               </div>
             )}
+            <div className="form-row">
+              <div className="form-group">
+                <label className="form-label">Role</label>
+                <select className="form-input" value={form.role} onChange={(e) => set('role', e.target.value)}>
+                  <option value="admin">Admin</option>
+                  <option value="supervisor">Supervisor</option>
+                  <option value="agent">Agent</option>
+                </select>
+              </div>
+              {isEdit && (
+                <div className="form-group">
+                  <label className="form-label">Status</label>
+                  <select className="form-input" value={form.status} onChange={(e) => set('status', e.target.value)}>
+                    <option value="active">Active</option>
+                    <option value="offline">Offline</option>
+                    <option value="inactive">Inactive</option>
+                  </select>
+                </div>
+              )}
+            </div>
+            <div className="form-group">
+              <label className="form-label">
+                Team {form.role === 'agent' ? <span style={{ color: '#ef4444' }}>*</span> : <span style={{ color: 'var(--text-muted)' }}>(optional)</span>}
+              </label>
+              <select className="form-input" value={form.teamId} onChange={(e) => set('teamId', e.target.value)}>
+                <option value="">No team</option>
+                {teams.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
+              </select>
+              {form.role === 'agent' && !form.teamId && (
+                <p style={{ fontSize: '0.75rem', color: '#ef4444', marginTop: 4 }}>Agents must be assigned to a team/supervisor.</p>
+              )}
+            </div>
           </div>
-          <div className="form-group">
-            <label className="form-label">
-              Team {form.role === 'agent' ? <span style={{ color: '#ef4444' }}>*</span> : <span style={{ color: 'var(--text-muted)' }}>(optional)</span>}
-            </label>
-            <select className="form-input" value={form.teamId} onChange={(e) => set('teamId', e.target.value)}>
-              <option value="">No team</option>
-              {teams.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
-            </select>
-            {form.role === 'agent' && !form.teamId && (
-              <p style={{ fontSize: '0.75rem', color: '#ef4444', marginTop: 4 }}>Agents must be assigned to a team/supervisor.</p>
-            )}
+          <div className="modal-footer">
+            <button type="button" className="btn btn-secondary" onClick={onClose}>Cancel</button>
+            <button type="submit" className="btn btn-primary">
+              {isEdit ? 'Save Changes' : 'Create User'}
+            </button>
           </div>
-        </div>
-        <div className="modal-footer">
-          <button className="btn btn-secondary" onClick={onClose}>Cancel</button>
-          <button className="btn btn-primary" onClick={() => {
-            if (form.role === 'agent' && !form.teamId) {
-              toast.error('Agents must be assigned to a team/supervisor.');
-              return;
-            }
-            if (!form.name || !form.email) {
-              toast.error('Name and email are required.');
-              return;
-            }
-            onSave({
-              name: form.name, email: form.email, role: form.role,
-              teamId: form.teamId || null, status: form.status,
-              ...(form.password ? { password: form.password } : {}),
-            });
-          }}>
-            {isEdit ? 'Save Changes' : 'Create User'}
-          </button>
-        </div>
+        </form>
       </div>
     </div>
   );
