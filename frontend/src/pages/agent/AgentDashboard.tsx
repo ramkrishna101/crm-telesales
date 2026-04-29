@@ -286,9 +286,12 @@ export default function AgentWorkspace() {
     await logCallMutation.mutateAsync({ leadId: currentLead.id, dispositionTag: tag, durationSeconds: duration, notes });
     if (scheduledAt) {
       try {
-        await followUpsService.create({ leadId: currentLead.id, scheduledAt, notes: `Callback requested` });
+        const isoDate = new Date(scheduledAt).toISOString();
+        await followUpsService.create({ leadId: currentLead.id, scheduledAt: isoDate, notes: `Callback requested` });
         toast.success('Follow-up scheduled');
-      } catch {}
+      } catch (err: any) {
+        toast.error(err?.response?.data?.error?.message || 'Failed to schedule follow-up');
+      }
     }
   };
 
