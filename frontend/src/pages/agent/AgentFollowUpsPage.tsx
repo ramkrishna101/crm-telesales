@@ -63,7 +63,9 @@ export default function AgentFollowUpsPage() {
             <div key={f.id} className="table-row">
               <div className="table-cell">
                 <div style={{ fontWeight: 600, color: 'var(--text-primary)' }}>{f.lead?.name || 'Unknown Lead'}</div>
-                <div style={{ fontSize: '0.85rem', color: 'var(--text-secondary)' }}>{f.lead?.phone}</div>
+                <div style={{ fontSize: '0.85rem', color: 'var(--text-secondary)' }}>
+                  {f.lead?.phone ? f.lead.phone.slice(0, -4).replace(/[0-9]/g, 'X') + f.lead.phone.slice(-4) : ''}
+                </div>
               </div>
               <div className="table-cell">
                 <div style={{ display: 'flex', alignItems: 'center', gap: 6, color: 'var(--accent)' }}>
