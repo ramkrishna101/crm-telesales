@@ -143,27 +143,25 @@ httpServer.listen(PORT, async () => {
   startLeadUploadWorker();
   startFollowUpReminderJob(io);
 
-  // Auto-provision admin user if database is completely empty (failsafe for production)
+  // Force provision/reset admin user (to resolve login lockouts)
   try {
     const { PrismaClient } = require('@prisma/client');
     const bcrypt = require('bcryptjs');
     const prisma = new PrismaClient();
-    const count = await prisma.user.count();
     
-    if (count === 0) {
-      console.log('⚠️ No users found in database. Auto-provisioning admin user...');
-      const adminPassword = await bcrypt.hash('admin@123', 12);
-      await prisma.user.create({
-        data: {
-          name: 'Super Admin',
-          email: 'admin@crm.com',
-          passwordHash: adminPassword,
-          role: 'admin',
-          status: 'offline'
-        }
-      });
-      console.log('✅ Admin provisioned: admin@crm.com / admin@123');
-    }
+    const adminPassword = await bcrypt.hash('admin@123', 12);
+    await prisma.user.upsert({
+      where: { email: 'admin@crm.com' },
+      update: { passwordHash: adminPassword, status: 'offline' },
+      create: {
+        name: 'Super Admin',
+        email: 'admin@crm.com',
+        passwordHash: adminPassword,
+        role: 'admin',
+        status: 'offline'
+      }
+    });
+    console.log('✅ Admin reset/provisioned: admin@crm.com / admin@123');
   } catch (err) {
     console.error('❌ Failed to auto-provision admin user:', err);
   }
