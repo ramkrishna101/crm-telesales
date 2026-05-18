@@ -22,6 +22,7 @@ import { verifyAccessToken } from './lib/jwt';
 import { redis } from './lib/redis';
 
 const app = express();
+app.set('trust proxy', 1); // Required for express-rate-limit behind Railway/Render proxy
 const httpServer = createServer(app);
 
 // ── Socket.io Setup ───────────────────────────────────────────────────
