@@ -82,15 +82,23 @@ const authLimiter = rateLimit({
 // ── Health Check ──────────────────────────────────────────────────────
 app.get('/health', async (_req, res) => {
   let redisOk = false;
+  let userCount = -1;
   try {
     await redis.ping();
     redisOk = true;
+  } catch {}
+
+  try {
+    const { PrismaClient } = require('@prisma/client');
+    const prisma = new PrismaClient();
+    userCount = await prisma.user.count();
   } catch {}
 
   res.json({
     status: 'ok',
     timestamp: new Date().toISOString(),
     services: { redis: redisOk ? 'ok' : 'error' },
+    db: { users: userCount }
   });
 });
 
@@ -126,13 +134,39 @@ app.use(errorHandler as express.ErrorRequestHandler);
 
 // ── Start Server ──────────────────────────────────────────────────────
 const PORT = parseInt(process.env.PORT || '4000', 10);
-httpServer.listen(PORT, () => {
+httpServer.listen(PORT, async () => {
   console.log(`\n🚀 CRM Backend running on http://localhost:${PORT}`);
   console.log(`🔌 Socket.io ready`);
   console.log(`🌍 Environment: ${process.env.NODE_ENV || 'development'}\n`);
+  
   // Start background workers
   startLeadUploadWorker();
   startFollowUpReminderJob(io);
+
+  // Auto-provision admin user if database is completely empty (failsafe for production)
+  try {
+    const { PrismaClient } = require('@prisma/client');
+    const bcrypt = require('bcryptjs');
+    const prisma = new PrismaClient();
+    const count = await prisma.user.count();
+    
+    if (count === 0) {
+      console.log('⚠️ No users found in database. Auto-provisioning admin user...');
+      const adminPassword = await bcrypt.hash('admin@123', 12);
+      await prisma.user.create({
+        data: {
+          name: 'Super Admin',
+          email: 'admin@crm.com',
+          passwordHash: adminPassword,
+          role: 'admin',
+          status: 'offline'
+        }
+      });
+      console.log('✅ Admin provisioned: admin@crm.com / admin@123');
+    }
+  } catch (err) {
+    console.error('❌ Failed to auto-provision admin user:', err);
+  }
 });
 
 export default app;
