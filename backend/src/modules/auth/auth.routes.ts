@@ -37,7 +37,8 @@ router.post('/login', async (req: Request, res: Response, next: NextFunction) =>
     const { email, password } = loginSchema.parse(req.body);
 
     const user = await prisma.user.findUnique({ where: { email } });
-    if (!user || user.status === 'inactive') {
+    // Inactive status blocks agents/supervisors, but admins can always log in
+    if (!user || (user.status === 'inactive' && user.role !== 'admin')) {
       throw new AppError(401, 'INVALID_CREDENTIALS', 'Invalid email or password');
     }
 
