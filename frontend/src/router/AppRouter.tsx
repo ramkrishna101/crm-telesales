@@ -4,6 +4,13 @@ import { useAuthStore } from '../store/authStore';
 import LoginPage from '../pages/auth/LoginPage';
 import UnauthorizedPage from '../pages/auth/UnauthorizedPage';
 
+function RootRedirect() {
+  const { user, isAuthenticated } = useAuthStore();
+  if (!isAuthenticated || !user) return <Navigate to="/login" replace />;
+  const roleRedirects = { admin: '/admin', supervisor: '/supervisor', agent: '/agent' };
+  return <Navigate to={roleRedirects[user.role] || '/login'} replace />;
+}
+
 // Admin
 import AdminDashboard from '../pages/admin/AdminDashboard';
 import UsersPage from '../pages/admin/UsersPage';
@@ -66,11 +73,9 @@ export default function AppRouter() {
       </Route>
 
       {/* Root redirect */}
-      <Route element={<ProtectedRoute />}>
-        <Route path="/" element={<Navigate to="/login" replace />} />
-      </Route>
+      <Route path="/" element={<RootRedirect />} />
 
-      <Route path="*" element={<Navigate to="/login" replace />} />
+      <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>
   );
 }

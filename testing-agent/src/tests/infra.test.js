@@ -1,4 +1,4 @@
-import { suite, test, req, expect, warnFail } from './runner.js';
+import { suite, test, req, expect, warnFail } from '../runner.js';
 
 export async function runInfraTests() {
   suite('Infrastructure — Health & Connectivity');

@@ -1,4 +1,4 @@
-import { suite, test, req, expect, securityFail, warnFail } from './runner.js';
+import { suite, test, req, expect, securityFail, warnFail } from '../runner.js';
 
 let accessToken = null;
 let refreshToken = null;

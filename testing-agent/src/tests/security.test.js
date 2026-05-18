@@ -1,4 +1,4 @@
-import { suite, test, req, expect, securityFail, warnFail } from './runner.js';
+import { suite, test, req, expect, securityFail, warnFail } from '../runner.js';
 
 async function getToken(email, password) {
   const res = await req('POST', '/api/auth/login', { email, password });
