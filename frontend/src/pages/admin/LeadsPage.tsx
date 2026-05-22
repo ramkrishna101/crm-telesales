@@ -3,7 +3,55 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { leadsService, usersService, campaignsService } from '../../services/crm.service';
 import AppLayout from '../../components/layout/AppLayout';
 import toast from 'react-hot-toast';
+import * as XLSX from 'xlsx';
 import { Upload, Search, RefreshCw, ChevronLeft, ChevronRight, Download, FileSpreadsheet, CheckCircle2, X, UserCheck } from 'lucide-react';
+
+// ── Export Leads to Excel ─────────────────────────────────────────────
+
+async function exportLeads(
+  filters: { campaignId?: string; status?: string; assignedToId?: string },
+  campaigns: { id: string; name: string }[],
+  agents: { id: string; name: string }[],
+) {
+  toast.loading('Preparing export…', { id: 'export' });
+  try {
+    // First fetch to get the real total count
+    const countRes = await leadsService.list({ limit: 1, page: 1, ...filters });
+    const total: number = countRes.data?.data?.total ?? 0;
+    if (!total) {
+      toast.error('No leads to export', { id: 'export' });
+      return;
+    }
+    // Fetch all leads in one go using the real total
+    const res = await leadsService.list({ limit: total, page: 1, ...filters });
+    const leads = res.data?.data?.leads ?? [];
+    if (!leads.length) {
+      toast.error('No leads to export', { id: 'export' });
+      return;
+    }
+    const campaignMap = Object.fromEntries(campaigns.map((c) => [c.id, c.name]));
+    const agentMap = Object.fromEntries(agents.map((a) => [a.id, a.name]));
+    const rows = leads.map((l: Record<string, unknown>) => ({
+      Name: l.name ?? '',
+      Email: l.email ?? '',
+      Status: l.status,
+      Priority: l.priority,
+      DND: (l.isDnd as boolean) ? 'Yes' : 'No',
+      Campaign: campaignMap[(l.campaignId as string)] ?? l.campaignId,
+      'Assigned To': l.assignedToId ? (agentMap[(l.assignedToId as string)] ?? l.assignedToId) : 'Unassigned',
+      'Last Called': l.lastCalledAt ? new Date(l.lastCalledAt as string).toLocaleString() : '',
+      'Created At': new Date(l.createdAt as string).toLocaleString(),
+    }));
+    const ws = XLSX.utils.json_to_sheet(rows);
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, 'Leads');
+    const filename = `leads_export_${new Date().toISOString().slice(0, 10)}.xlsx`;
+    XLSX.writeFile(wb, filename);
+    toast.success(`Exported ${leads.length} leads`, { id: 'export' });
+  } catch {
+    toast.error('Export failed', { id: 'export' });
+  }
+}
 
 // ── Template Download ─────────────────────────────────────────────────
 
@@ -328,6 +376,20 @@ export default function LeadsPage() {
             )}
             <button className="btn btn-secondary" onClick={downloadTemplate}>
               <Download size={15} /> Template
+            </button>
+            <button
+              className="btn btn-secondary"
+              onClick={() => exportLeads(
+                {
+                  ...(campaignFilter ? { campaignId: campaignFilter } : {}),
+                  ...(statusFilter ? { status: statusFilter } : {}),
+                  ...(agentFilter ? { assignedToId: agentFilter } : {}),
+                },
+                campaigns as { id: string; name: string }[],
+                agents as { id: string; name: string }[],
+              )}
+            >
+              <FileSpreadsheet size={15} /> Export
             </button>
             <button className="btn btn-primary" onClick={() => setShowUpload(!showUpload)}>
               <Upload size={15} /> {showUpload ? 'Hide Upload' : 'Upload Leads'}
