@@ -33,8 +33,10 @@ async function exportLeads(
     const agentMap = Object.fromEntries(agents.map((a) => [a.id, a.name]));
     const rows = leads.map((l: Record<string, unknown>) => ({
       Name: l.name ?? '',
+      'Mobile Number': l.phone ?? '',
       Email: l.email ?? '',
       Status: l.status,
+      Disposition: l.status,
       Priority: l.priority,
       DND: (l.isDnd as boolean) ? 'Yes' : 'No',
       Campaign: campaignMap[(l.campaignId as string)] ?? l.campaignId,
