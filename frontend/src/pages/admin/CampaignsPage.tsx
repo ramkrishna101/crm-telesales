@@ -1,14 +1,21 @@
+  const priorityColour: Record<string, string> = { high: '#ef4444', normal: '#7c6cff' };
 import { useState, useRef } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { campaignsService, teamsService, usersService, leadsService } from '../../services/crm.service';
 import AppLayout from '../../components/layout/AppLayout';
 import toast from 'react-hot-toast';
 import {
-  Plus, X, BarChart2, Pause, Play, Eye,
+  Plus, X, BarChart2, Pause, Play, Eye, Search,
   RefreshCw, ChevronRight, ChevronLeft,
   Users2, Building2, CheckCircle2, UserPlus, UserMinus,
   Upload, FileSpreadsheet, FileText, CheckCircle, TrendingUp, PhoneCall, Users
 } from 'lucide-react';
+
+const formatCampaignDate = (value: string) => new Intl.DateTimeFormat('en-US', {
+  month: 'short',
+  day: 'numeric',
+  year: 'numeric',
+}).format(new Date(value));
 
 interface Campaign {
   id: string; name: string; description?: string;
@@ -439,6 +446,7 @@ export default function CampaignsPage() {
   const [selectedStatsId, setSelectedStatsId] = useState<string | null>(null);
   const [editTeamId, setEditTeamId] = useState<string | null>(null);
   const [statusFilter, setStatusFilter] = useState('');
+  const [searchTerm, setSearchTerm] = useState('');
 
   const { data: campaignsData, isLoading } = useQuery({
     queryKey: ['campaigns', statusFilter],
@@ -465,6 +473,9 @@ export default function CampaignsPage() {
   const campaigns: Campaign[] = campaignsData?.data?.data?.campaigns || [];
   const teams: Team[] = teamsData?.data?.data || [];
   const agents: User[] = usersData?.data?.data?.users || [];
+  const filteredCampaigns = campaigns.filter((campaign) =>
+    campaign.name.toLowerCase().includes(searchTerm.trim().toLowerCase()),
+  );
 
   const statusColour: Record<string, string> = { active: '#22c55e', paused: '#f59e0b', closed: '#94a3b8' };
   const priorityColour: Record<string, string> = { high: '#ef4444', normal: '#6366f1' };
@@ -483,6 +494,18 @@ export default function CampaignsPage() {
         </div>
 
         <div className="filter-bar">
+          <div className="search-box">
+            <Search size={16} className="search-icon" />
+            <input
+              className="search-input"
+              type="search"
+              value={searchTerm}
+              onChange={(e) => setSearchTerm(e.target.value)}
+              placeholder="Search campaign name"
+              aria-label="Search campaign name"
+            />
+          </div>
+
           <div className="filter-tabs">
             {['', 'active', 'paused', 'closed'].map((s) => (
               <button key={s} className={`filter-tab ${statusFilter === s ? 'filter-tab--active' : ''}`}
@@ -494,53 +517,69 @@ export default function CampaignsPage() {
         </div>
 
         {isLoading && <div className="empty-state"><RefreshCw className="spin" size={20} /><p>Loading…</p></div>}
-        <div className="campaign-grid">
-          {campaigns.map((c) => (
-            <div key={c.id} className="campaign-card" onClick={() => setSelectedStatsId(c.id)} style={{ cursor: 'pointer' }}>
-              <div className="campaign-card__header">
-                <div style={{ flex: 1 }}>
-                  <div className="campaign-card__name">{c.name}</div>
-                  {c.description && <div className="campaign-card__desc">{c.description}</div>}
+        {!isLoading && filteredCampaigns.length > 0 && (
+          <div className="campaign-list card">
+            <div className="table-header campaign-list__header">
+              <div className="table-col campaign-list__campaign">Campaign</div>
+              <div className="table-col">Status</div>
+              <div className="table-col">Priority</div>
+              <div className="table-col">Type</div>
+              <div className="table-col">Leads</div>
+              <div className="table-col">Agents</div>
+              <div className="table-col">Team</div>
+              <div className="table-col">Created</div>
+              <div className="table-col campaign-list__actions">Actions</div>
+            </div>
+
+            {filteredCampaigns.map((c) => (
+              <div key={c.id} className="table-row campaign-list__row" onClick={() => setSelectedStatsId(c.id)} role="button" tabIndex={0}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' || e.key === ' ') {
+                    e.preventDefault();
+                    setSelectedStatsId(c.id);
+                  }
+                }}>
+                <div className="table-cell campaign-list__campaign">
+                  <div className="campaign-list__name">{c.name}</div>
+                  <div className="campaign-list__desc">{c.description || 'No description'}</div>
                 </div>
-                <div style={{ display: 'flex', gap: 4 }} onClick={e => e.stopPropagation()}>
+
+                <div className="table-cell">
+                  <span className="badge" style={{ background: (statusColour[c.status] || '#94a3b8') + '1f', color: statusColour[c.status] || '#94a3b8' }}>{c.status}</span>
+                </div>
+
+                <div className="table-cell">
+                  <span className="badge" style={{ background: (priorityColour[c.priority] || '#7c6cff') + '14', color: priorityColour[c.priority] || '#7c6cff' }}>{c.priority}</span>
+                </div>
+
+                <div className="table-cell">
+                  <span className="badge campaign-list__type-badge">{c.type}</span>
+                </div>
+
+                <div className="table-cell campaign-list__metric">{c._count.leads.toLocaleString()}</div>
+                <div className="table-cell campaign-list__metric" style={{ color: c._count.agents > 0 ? '#1f9d55' : 'var(--text-muted)' }}>{c._count.agents}</div>
+                <div className="table-cell">{c.team?.name || 'Unassigned'}</div>
+                <div className="table-cell">{formatCampaignDate(c.createdAt)}</div>
+
+                <div className="table-cell campaign-list__actions" onClick={(e) => e.stopPropagation()}>
+                  <button className="btn-icon" title="View analytics" onClick={() => setSelectedStatsId(c.id)}><Eye size={15} /></button>
                   {c.status === 'active'
                     ? <button className="btn-icon" title="Pause" onClick={() => updateMutation.mutate({ id: c.id, data: { status: 'paused' } })}><Pause size={15} /></button>
                     : c.status === 'paused'
                       ? <button className="btn-icon" title="Resume" onClick={() => updateMutation.mutate({ id: c.id, data: { status: 'active' } })}><Play size={15} /></button>
-                      : null
-                  }
+                      : null}
                   <button className="btn-icon" title="Change Team" onClick={() => setEditTeamId(c.id)}><Users size={15} /></button>
                 </div>
               </div>
+            ))}
+          </div>
+        )}
 
-              <div className="campaign-card__meta">
-                <span className="badge" style={{ background: (statusColour[c.status] || '#94a3b8') + '22', color: statusColour[c.status] || '#94a3b8' }}>{c.status}</span>
-                <span className="badge" style={{ background: (priorityColour[c.priority] || '#6366f1') + '22', color: priorityColour[c.priority] || '#6366f1' }}>{c.priority} priority</span>
-                <span className="badge" style={{ background: '#1e293b', color: '#64748b' }}>{c.type}</span>
-              </div>
-
-              <div className="campaign-card__stats">
-                <div className="campaign-stat">
-                  <span className="campaign-stat__value">{c._count.leads.toLocaleString()}</span>
-                  <span className="campaign-stat__label">Leads</span>
-                </div>
-                <div className="campaign-stat">
-                  <span className="campaign-stat__value" style={{ color: c._count.agents > 0 ? '#22c55e' : 'var(--text-muted)' }}>{c._count.agents}</span>
-                  <span className="campaign-stat__label">Agents</span>
-                </div>
-                <div className="campaign-stat">
-                  <span className="campaign-stat__value" style={{ fontSize: '0.85rem' }}>{c.team?.name || '—'}</span>
-                  <span className="campaign-stat__label">Team</span>
-                </div>
-              </div>
-            </div>
-          ))}
-          {!isLoading && campaigns.length === 0 && (
-            <div className="empty-state" style={{ gridColumn: '1/-1' }}>
-              <p>No campaigns yet. Create one to get started.</p>
-            </div>
-          )}
-        </div>
+        {!isLoading && filteredCampaigns.length === 0 && (
+          <div className="empty-state card">
+            <p>{searchTerm.trim() ? 'No campaigns match that name.' : 'No campaigns yet. Create one to get started.'}</p>
+          </div>
+        )}
       </div>
 
       {showCreate && (

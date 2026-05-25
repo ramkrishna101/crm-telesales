@@ -298,18 +298,19 @@ export default function AgentWorkspace() {
   return (
     <AppLayout>
       <div className="page-container">
-        {/* Header with break status */}
-        <div className="page-header">
+        <section className="dashboard-hero">
           <div>
+            <p className="section-eyebrow">Agent command desk</p>
             <h1 className="page-title">Agent Workspace</h1>
             <p className="page-subtitle">
               {stats?.isOnBreak
-                ? <span style={{ color: '#f59e0b' }}>⏸ On Break — <BreakTimer startedAt={stats.breakStartedAt} /></span>
-                : <span style={{ color: '#22c55e' }}>🟢 Active</span>
+                ? <span style={{ color: '#f59e0b' }}>On Break — <BreakTimer startedAt={stats.breakStartedAt} /></span>
+                : <span style={{ color: '#22c55e' }}>Ready for next lead</span>
               }
             </p>
           </div>
-          <div style={{ display: 'flex', gap: 8 }}>
+
+          <div className="page-actions">
             {stats?.isOnBreak
               ? <button className="btn btn-primary" onClick={() => breakEndMutation.mutate()}>
                   <Coffee size={16} /> End Break
@@ -318,16 +319,41 @@ export default function AgentWorkspace() {
                   <Coffee size={16} /> Take Break
                 </button>
             }
+            <button className="btn btn-secondary" onClick={() => { refetchDash(); refetchNext(); }}>
+              <RefreshCw size={14} /> Refresh desk
+            </button>
           </div>
-        </div>
 
-        {/* Stats Row */}
-        <div className="stats-grid" style={{ gridTemplateColumns: 'repeat(4, 1fr)' }}>
+          <div className="metric-ribbon">
+            <div className="metric-ribbon__item">
+              <span className="metric-ribbon__label">My leads</span>
+              <strong className="metric-ribbon__value">{stats?.totalLeads || 0}</strong>
+              <span className="metric-ribbon__sub">assigned to your queue</span>
+            </div>
+            <div className="metric-ribbon__item">
+              <span className="metric-ribbon__label">Pending</span>
+              <strong className="metric-ribbon__value">{stats?.pendingLeads || 0}</strong>
+              <span className="metric-ribbon__sub">not yet contacted</span>
+            </div>
+            <div className="metric-ribbon__item">
+              <span className="metric-ribbon__label">Today's calls</span>
+              <strong className="metric-ribbon__value">{stats?.callsToday || 0}</strong>
+              <span className="metric-ribbon__sub">logged today</span>
+            </div>
+            <div className="metric-ribbon__item">
+              <span className="metric-ribbon__label">Break time</span>
+              <strong className="metric-ribbon__value">{stats?.breakMinutesToday || 0}m</strong>
+              <span className="metric-ribbon__sub">used across the shift</span>
+            </div>
+          </div>
+        </section>
+
+        <div className="stats-grid">
           {[
             { label: 'My Leads', value: stats?.totalLeads || 0, icon: <Phone size={20} />, colour: '#6366f1' },
             { label: 'Pending', value: stats?.pendingLeads || 0, icon: <AlertCircle size={20} />, colour: '#f59e0b' },
             { label: "Today's Calls", value: stats?.callsToday || 0, icon: <PhoneCall size={20} />, colour: '#22c55e' },
-            { label: 'Break Mins', value: `${stats?.breakMinutesToday || 0}m`, icon: <Clock size={20} />, colour: '#a78bfa' },
+            { label: 'Break Mins', value: `${stats?.breakMinutesToday || 0}m`, icon: <Clock size={20} />, colour: '#22d3ee' },
           ].map(({ label, value, icon, colour }) => (
             <div key={label} className="stat-card" style={{ '--card-accent': colour } as React.CSSProperties}>
               <div className="stat-card__icon" style={{ background: colour + '22', color: colour }}>{icon}</div>
@@ -339,12 +365,11 @@ export default function AgentWorkspace() {
           ))}
         </div>
 
-        <div className="two-col-grid">
-          {/* MAIN CALL PANEL */}
-          <div className="card">
-            <div className="card-header">
+        <div className="dashboard-grid dashboard-grid--agent">
+          <div className="card card--spotlight">
+            <div className="card-header card-header--dense">
               <h2 className="card-title">
-                {nextLeadResp?.type === 'follow_up' ? '⏰ Overdue Follow-up' : '📞 Next Lead'}
+                {nextLeadResp?.type === 'follow_up' ? 'Overdue Follow-up' : 'Next Lead'}
               </h2>
               <button className="btn-icon" onClick={() => refetchNext()}><RefreshCw size={15} /></button>
             </div>
@@ -444,12 +469,13 @@ export default function AgentWorkspace() {
             )}
           </div>
 
-          {/* SIDEBAR: RECENT ACTIVITY & FOLLOW-UPS */}
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
-            {/* RECENT ACTIVITY */}
+          <div className="dashboard-stack">
             <div className="card">
-              <div className="card-header">
-                <h2 className="card-title">Recent Activity</h2>
+              <div className="card-header card-header--dense">
+                <div>
+                  <div className="card-kicker">Call feed</div>
+                  <h2 className="card-title">Recent Activity</h2>
+                </div>
               </div>
               {recentCalls.length === 0 ? (
                 <div className="empty-state"><RefreshCw size={28} style={{ opacity: 0.4 }} /><p>No recent activity</p></div>
@@ -473,10 +499,12 @@ export default function AgentWorkspace() {
               )}
             </div>
 
-            {/* FOLLOW-UPS */}
             <div className="card">
-              <div className="card-header">
-                <h2 className="card-title">Today's Follow-ups</h2>
+              <div className="card-header card-header--dense">
+                <div>
+                  <div className="card-kicker">Callback queue</div>
+                  <h2 className="card-title">Today's Follow-ups</h2>
+                </div>
                 <span className="badge" style={{ background: '#1e293b', color: '#a78bfa' }}>
                   {followUps.length} pending
                 </span>
@@ -517,9 +545,12 @@ export default function AgentWorkspace() {
         {/* Today's Tag Stats */}
         {dashData?.data?.data?.tagStats?.length > 0 && (
           <div className="card">
-            <div className="card-header">
-              <h2 className="card-title">Today's Dispositions</h2>
-              <p style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>Click a row to see leads</p>
+            <div className="card-header card-header--dense">
+              <div>
+                <div className="card-kicker">Outcome mix</div>
+                <h2 className="card-title">Today's Dispositions</h2>
+              </div>
+              <p style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>Click a row to inspect leads</p>
             </div>
             <div className="card-body">
               {(dashData?.data?.data?.tagStats as { tag: string; count: number }[] || []).map((t) => (

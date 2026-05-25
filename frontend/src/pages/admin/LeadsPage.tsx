@@ -348,8 +348,12 @@ export default function LeadsPage() {
   const pages = Math.ceil(total / LIMIT);
 
   const statusColour: Record<string, string> = {
-    uncontacted: '#6366f1', contacted: '#22d3ee', lead: '#22c55e',
-    not_interested: '#ef4444', dnd: '#dc2626', invalid: '#94a3b8', callback: '#f59e0b',
+    uncontacted: '#6f63ff', contacted: '#3b82f6', lead: '#1f9d55',
+    not_interested: '#dc2626', dnd: '#c2410c', invalid: '#64748b', callback: '#c67a0a',
+  };
+  const priorityTone: Record<string, { background: string; color: string }> = {
+    high: { background: '#fff0f0', color: '#dc2626' },
+    normal: { background: '#eef2f7', color: '#64748b' },
   };
 
   const toggleSelect = (id: string) =>
@@ -474,12 +478,12 @@ export default function LeadsPage() {
                 </div>
               </div>
               <div className="table-cell">
-                <span className="badge" style={{ background: (statusColour[l.status] || '#6366f1') + '22', color: statusColour[l.status] || '#6366f1' }}>
+                <span className="badge" style={{ background: (statusColour[l.status] || '#6366f1') + '1a', color: statusColour[l.status] || '#6366f1' }}>
                   {l.status.replace('_', ' ')}
                 </span>
               </div>
               <div className="table-cell">
-                <span className="badge" style={{ background: l.priority === 'high' ? '#45090a' : '#1e293b', color: l.priority === 'high' ? '#f87171' : '#64748b' }}>
+                <span className="badge" style={priorityTone[l.priority] || priorityTone.normal}>
                   {l.priority}
                 </span>
               </div>

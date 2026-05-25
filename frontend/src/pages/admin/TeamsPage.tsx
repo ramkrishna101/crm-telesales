@@ -3,7 +3,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { teamsService, usersService } from '../../services/crm.service';
 import AppLayout from '../../components/layout/AppLayout';
 import toast from 'react-hot-toast';
-import { Plus, Edit2, Users, X, RefreshCw, UserPlus, UserMinus } from 'lucide-react';
+import { Plus, Edit2, Users, X, RefreshCw, UserPlus, UserMinus, Search } from 'lucide-react';
 
 interface Team {
   id: string; name: string; description?: string;
@@ -70,12 +70,18 @@ function MembersPanel({ team, agents, onAddMembers, onRemoveMembers }: {
 }) {
   const [addId, setAddId] = useState('');
   const unassignedAgents = agents.filter(a => !(team.members || []).find(m => m.id === a.id) && a.role === 'agent');
+  const memberStatusTone: Record<string, { background: string; color: string; label: string }> = {
+    active: { background: '#e9f8ef', color: '#1f9d55', label: 'Active' },
+    offline: { background: '#eef2f7', color: '#64748b', label: 'Offline' },
+    inactive: { background: '#f3f4f8', color: '#6b7280', label: 'Inactive' },
+    on_break: { background: '#fff4df', color: '#c67a0a', label: 'On Break' },
+  };
 
   return (
     <div className="members-panel">
       <div className="members-panel__header">
         <span style={{ fontWeight: 600, color: 'var(--text-primary)' }}>{team.name}</span>
-        <span className="badge" style={{ background: '#1e293b', color: '#a78bfa' }}>{team._count.members} members</span>
+        <span className="badge" style={{ background: '#efeefe', color: '#635bff' }}>{team._count.members} members</span>
       </div>
       {/* Current members */}
       <div style={{ marginBottom: 12 }}>
@@ -83,7 +89,9 @@ function MembersPanel({ team, agents, onAddMembers, onRemoveMembers }: {
           <div key={m.id} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '6px 0', borderBottom: '1px solid var(--border)' }}>
             <div className="avatar avatar--sm">{m.name.charAt(0)}</div>
             <span style={{ flex: 1, fontSize: '0.85rem', color: 'var(--text-primary)' }}>{m.name}</span>
-            <span className="badge" style={{ background: m.status === 'active' ? '#14532d' : '#1e293b', color: m.status === 'active' ? '#22c55e' : '#64748b' }}>{m.status}</span>
+            <span className="badge" style={memberStatusTone[m.status] || memberStatusTone.offline}>
+              {(memberStatusTone[m.status] || memberStatusTone.offline).label}
+            </span>
             <button className="btn-icon" title="Remove" onClick={() => onRemoveMembers([m.id])} style={{ color: 'var(--red)' }}>
               <UserMinus size={14} />
             </button>
@@ -114,6 +122,7 @@ export default function TeamsPage() {
   const [showCreate, setShowCreate] = useState(false);
   const [editTeam, setEditTeam] = useState<Team | null>(null);
   const [expandedTeam, setExpandedTeam] = useState<string | null>(null);
+  const [search, setSearch] = useState('');
 
   const { data: teamsData, isLoading } = useQuery({
     queryKey: ['teams'],
@@ -153,6 +162,14 @@ export default function TeamsPage() {
   const users: User[] = usersData?.data?.data?.users || [];
   const supervisors = users.filter(u => u.role === 'supervisor');
   const agents = users.filter(u => u.role === 'agent');
+  const filteredTeams = teams.filter((team) => {
+    const query = search.trim().toLowerCase();
+    if (!query) return true;
+
+    return team.name.toLowerCase().includes(query)
+      || (team.description || '').toLowerCase().includes(query)
+      || (team.supervisor?.name || '').toLowerCase().includes(query);
+  });
 
   return (
     <AppLayout>
@@ -167,68 +184,87 @@ export default function TeamsPage() {
           </button>
         </div>
 
+        <div className="filter-bar">
+          <div className="search-box">
+            <Search size={15} className="search-icon" />
+            <input
+              className="search-input"
+              placeholder="Search teams..."
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+            />
+          </div>
+        </div>
+
         {isLoading && <div className="empty-state"><RefreshCw className="spin" size={20} /><p>Loading…</p></div>}
 
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-          {teams.map(team => (
-            <div key={team.id} className="card">
-              {/* Team Header Row */}
-              <div className="table-row" style={{ padding: '16px 20px', cursor: 'pointer' }}
-                onClick={() => setExpandedTeam(expandedTeam === team.id ? null : team.id)}>
-                <div style={{ flex: 1, display: 'flex', alignItems: 'center', gap: 14 }}>
-                  <div style={{
-                    width: 44, height: 44, borderRadius: 12, flexShrink: 0,
-                    background: 'linear-gradient(135deg, #6366f1, #8b5cf6)',
-                    display: 'flex', alignItems: 'center', justifyContent: 'center',
-                    fontWeight: 800, fontSize: '1.1rem', color: '#fff',
-                  }}>
-                    {team.name.charAt(0)}
-                  </div>
-                  <div>
-                    <div style={{ fontWeight: 700, color: 'var(--text-primary)', fontSize: '1rem' }}>{team.name}</div>
-                    {team.description && <div style={{ fontSize: '0.78rem', color: 'var(--text-muted)' }}>{team.description}</div>}
-                  </div>
-                </div>
-                <div style={{ display: 'flex', gap: 24, alignItems: 'center' }}>
-                  {team.supervisor && (
-                    <div style={{ textAlign: 'center' }}>
-                      <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', fontWeight: 600, textTransform: 'uppercase' }}>Supervisor</div>
-                      <div style={{ fontSize: '0.85rem', color: '#22d3ee' }}>{team.supervisor.name}</div>
+        {!isLoading && filteredTeams.length > 0 && (
+          <div className="card">
+            <div className="table-header">
+              <div className="table-col" style={{ flex: 2 }}>Team</div>
+              <div className="table-col">Supervisor</div>
+              <div className="table-col">Members</div>
+              <div className="table-col">Leads</div>
+              <div className="table-col">Description</div>
+              <div className="table-col">Actions</div>
+            </div>
+
+            {filteredTeams.map((team) => (
+              <div key={team.id}>
+                <div
+                  className="table-row"
+                  style={{ cursor: 'pointer' }}
+                  onClick={() => setExpandedTeam(expandedTeam === team.id ? null : team.id)}
+                >
+                  <div className="table-cell" style={{ flex: 2, display: 'flex', gap: 12, alignItems: 'center' }}>
+                    <div className="avatar">{team.name.charAt(0)}</div>
+                    <div>
+                      <div style={{ fontWeight: 700, color: 'var(--text-primary)' }}>{team.name}</div>
+                      <div style={{ fontSize: '0.76rem', color: 'var(--text-muted)' }}>
+                        {expandedTeam === team.id ? 'Hide members' : 'View members'}
+                      </div>
                     </div>
-                  )}
-                  <div style={{ textAlign: 'center' }}>
-                    <div style={{ fontSize: '1.4rem', fontWeight: 800, color: 'var(--text-primary)' }}>{team._count.members}</div>
-                    <div style={{ fontSize: '0.72rem', color: 'var(--text-muted)', textTransform: 'uppercase', fontWeight: 600 }}>Agents</div>
                   </div>
-                  <div style={{ display: 'flex', gap: 4 }}>
-                    <button className="btn-icon" onClick={e => { e.stopPropagation(); setEditTeam(team); }}><Edit2 size={15} /></button>
-                    <button className="btn-icon" onClick={e => { e.stopPropagation(); setExpandedTeam(expandedTeam === team.id ? null : team.id); }}>
+                    <div className="table-cell" style={{ color: team.supervisor ? '#5f6bff' : 'var(--text-muted)', fontWeight: team.supervisor ? 600 : 500 }}>
+                    {team.supervisor?.name || 'Unassigned'}
+                  </div>
+                  <div className="table-cell" style={{ fontWeight: 700, color: 'var(--text-primary)' }}>
+                    {team._count.members}
+                  </div>
+                  <div className="table-cell" style={{ fontWeight: 700, color: 'var(--text-primary)' }}>
+                    {team._count.leads}
+                  </div>
+                  <div className="table-cell" style={{ color: 'var(--text-secondary)' }}>
+                    {team.description || 'No description'}
+                  </div>
+                  <div className="table-cell" style={{ display: 'flex', gap: 4 }} onClick={(e) => e.stopPropagation()}>
+                    <button className="btn-icon" title="Edit" onClick={() => setEditTeam(team)}><Edit2 size={15} /></button>
+                    <button className="btn-icon" title="Manage Members" onClick={() => setExpandedTeam(expandedTeam === team.id ? null : team.id)}>
                       <Users size={15} />
                     </button>
                   </div>
                 </div>
-              </div>
 
-              {/* Expanded members panel */}
-              {expandedTeam === team.id && (
-                <div style={{ borderTop: '1px solid var(--border)', padding: 20, background: 'var(--bg-elevated)' }}>
-                  <MembersPanel
-                    team={team}
-                    agents={agents}
-                    onAddMembers={ids => addMembersMutation.mutate({ teamId: team.id, agentIds: ids })}
-                    onRemoveMembers={ids => removeMembersMutation.mutate({ teamId: team.id, agentIds: ids })}
-                  />
-                </div>
-              )}
-            </div>
-          ))}
-          {!isLoading && teams.length === 0 && (
-            <div className="empty-state" style={{ border: '1px dashed var(--border-subtle)', borderRadius: 14, padding: 48 }}>
-              <Users size={36} style={{ opacity: 0.3 }} />
-              <p>No teams yet. Create one to organize your agents.</p>
-            </div>
-          )}
-        </div>
+                {expandedTeam === team.id && (
+                  <div style={{ borderTop: '1px solid var(--border)', padding: 20, background: '#fafafe' }}>
+                    <MembersPanel
+                      team={team}
+                      agents={agents}
+                      onAddMembers={ids => addMembersMutation.mutate({ teamId: team.id, agentIds: ids })}
+                      onRemoveMembers={ids => removeMembersMutation.mutate({ teamId: team.id, agentIds: ids })}
+                    />
+                  </div>
+                )}
+              </div>
+            ))}
+          </div>
+        )}
+
+        {!isLoading && filteredTeams.length === 0 && (
+          <div className="empty-state card">
+            <p>{search.trim() ? 'No teams match that search.' : 'No teams yet. Create one to organize your agents.'}</p>
+          </div>
+        )}
       </div>
 
       {(showCreate || editTeam) && (

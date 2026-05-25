@@ -1,9 +1,12 @@
-import { useState } from 'react';
+  const roleColour: Record<string, string> = { admin: '#7c6cff', supervisor: '#22d3ee', agent: '#22c55e' };
+import { useEffect, useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { usersService, teamsService } from '../../services/crm.service';
 import AppLayout from '../../components/layout/AppLayout';
 import toast from 'react-hot-toast';
 import { Plus, RefreshCw, Search, UserX, UserCheck, Edit2, X, Key, Clock } from 'lucide-react';
+
+const USERS_PAGE_SIZE = 10;
 
 type UserRole = 'admin' | 'supervisor' | 'agent';
 type UserStatus = 'active' | 'inactive' | 'on_break' | 'offline';
@@ -221,6 +224,7 @@ export default function UsersPage() {
   const qc = useQueryClient();
   const [search, setSearch] = useState('');
   const [roleFilter, setRoleFilter] = useState('');
+  const [page, setPage] = useState(1);
   const [editUser, setEditUser] = useState<User | null>(null);
   const [resetUser, setResetUser] = useState<User | null>(null);
   const [breakUser, setBreakUser] = useState<User | null>(null);
@@ -269,8 +273,25 @@ export default function UsersPage() {
   const filtered = users.filter(
     (u) => u.name.toLowerCase().includes(search.toLowerCase()) || u.email.toLowerCase().includes(search.toLowerCase())
   );
+  const totalPages = Math.max(1, Math.ceil(filtered.length / USERS_PAGE_SIZE));
+  const currentPage = Math.min(page, totalPages);
+  const paginatedUsers = filtered.slice((currentPage - 1) * USERS_PAGE_SIZE, currentPage * USERS_PAGE_SIZE);
+
+  useEffect(() => {
+    setPage(1);
+  }, [search, roleFilter]);
+
+  useEffect(() => {
+    if (page > totalPages) setPage(totalPages);
+  }, [page, totalPages]);
 
   const roleColour: Record<string, string> = { admin: '#6366f1', supervisor: '#22d3ee', agent: '#22c55e' };
+  const statusTone: Record<UserStatus, { background: string; color: string; label: string }> = {
+    active: { background: '#e9f8ef', color: '#1f9d55', label: 'Active' },
+    inactive: { background: '#f3f4f8', color: '#6b7280', label: 'Inactive' },
+    on_break: { background: '#fff4df', color: '#c67a0a', label: 'On Break' },
+    offline: { background: '#eef2f7', color: '#64748b', label: 'Offline' },
+  };
 
   return (
     <AppLayout>
@@ -311,7 +332,7 @@ export default function UsersPage() {
             <div className="table-col">Actions</div>
           </div>
           {isLoading && <div className="empty-state"><RefreshCw className="spin" size={20} /><p>Loading…</p></div>}
-          {filtered.map((u) => (
+          {paginatedUsers.map((u) => (
             <div key={u.id} className="table-row">
               <div className="table-cell" style={{ flex: 2, display: 'flex', gap: 10, alignItems: 'center' }}>
                 <div className="avatar avatar--sm">{u.name.charAt(0)}</div>
@@ -325,11 +346,8 @@ export default function UsersPage() {
               </div>
               <div className="table-cell" style={{ color: 'var(--text-secondary)' }}>{u.team?.name || '—'}</div>
               <div className="table-cell">
-                <span className="badge" style={{ 
-                  background: u.status === 'active' ? '#14532d' : u.status === 'on_break' ? '#a16207' : u.status === 'offline' ? '#334155' : '#1e293b', 
-                  color: u.status === 'active' ? '#22c55e' : u.status === 'on_break' ? '#fde047' : u.status === 'offline' ? '#cbd5e1' : '#64748b' 
-                }}>
-                  {u.status === 'on_break' ? 'On Break' : u.status === 'offline' ? 'Offline' : u.status}
+                <span className="badge" style={statusTone[u.status]}>
+                  {statusTone[u.status].label}
                 </span>
               </div>
               <div className="table-cell" style={{ color: 'var(--text-muted)', fontSize: '0.78rem' }}>
@@ -352,6 +370,28 @@ export default function UsersPage() {
             <div className="empty-state"><p>No users found</p></div>
           )}
         </div>
+
+        {!isLoading && filtered.length > 0 && (
+          <div className="pagination">
+            <button
+              className="btn btn-secondary"
+              disabled={currentPage === 1}
+              onClick={() => setPage((value) => Math.max(1, value - 1))}
+            >
+              Previous
+            </button>
+            <span style={{ fontSize: '0.85rem', color: 'var(--text-secondary)' }}>
+              Page {currentPage} of {totalPages}
+            </span>
+            <button
+              className="btn btn-secondary"
+              disabled={currentPage === totalPages}
+              onClick={() => setPage((value) => Math.min(totalPages, value + 1))}
+            >
+              Next
+            </button>
+          </div>
+        )}
       </div>
 
       {(showCreate || editUser) && (

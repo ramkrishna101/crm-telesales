@@ -108,8 +108,8 @@ export default function AnalyticsPage() {
   const tagLabels = (summary?.tagBreakdown || []).map((t: { tag: string }) => t.tag);
   const tagCounts = (summary?.tagBreakdown || []).map((t: { count: number }) => t.count);
   const tagColours = [
-    '#6366f1', '#22d3ee', '#22c55e', '#f59e0b', '#ef4444',
-    '#a78bfa', '#34d399', '#fb923c', '#60a5fa', '#f472b6',
+    '#7c6cff', '#22d3ee', '#22c55e', '#f59e0b', '#ef4444',
+    '#8b5cf6', '#34d399', '#fb923c', '#60a5fa', '#f472b6',
   ];
 
   const rangeLabel = typeof range === 'number' ? `Last ${range} days` : range.charAt(0).toUpperCase() + range.slice(1);
@@ -173,8 +173,8 @@ export default function AnalyticsPage() {
                   datasets: [{
                     label: 'Calls',
                     data: dailyCounts,
-                    backgroundColor: 'rgba(99, 102, 241, 0.7)',
-                    borderColor: '#6366f1',
+                    backgroundColor: 'rgba(124, 108, 255, 0.7)',
+                    borderColor: '#7c6cff',
                     borderWidth: 1,
                     borderRadius: 4,
                   }],

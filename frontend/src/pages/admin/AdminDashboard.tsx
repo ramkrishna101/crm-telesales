@@ -50,7 +50,7 @@ function CampaignRow({ c }: { c: Record<string, unknown> }) {
       </div>
       <div className="table-cell">{(c._count as Record<string, number>)?.leads?.toLocaleString()}</div>
       <div className="table-cell">
-        <span className="badge" style={{ background: c.priority === 'high' ? '#ef444422' : '#1e293b', color: c.priority === 'high' ? '#ef4444' : '#64748b' }}>
+        <span className="badge" style={{ background: c.priority === 'high' ? '#fff0f0' : '#f3f4f8', color: c.priority === 'high' ? '#dc2626' : '#6b7280' }}>
           {c.priority as string}
         </span>
       </div>
@@ -118,24 +118,51 @@ export default function AdminDashboard() {
   const agents = users.filter((u) => u.role === 'agent');
   const activeCampaigns = campaigns.filter((c) => c.status === 'active').length;
   const totalCalls = callData?.dailyTotals?.reduce((s: number, d: { count: number }) => s + d.count, 0) || 0;
+  const connectedCalls = callData?.agentLeaderboard?.reduce((sum: number, agent: { connected: number }) => sum + agent.connected, 0) || 0;
+  const callbackCount = callData?.tagBreakdown?.find((tag: { tag: string }) => tag.tag === 'Callback')?.count || 0;
+  const connectRate = totalCalls ? Math.round((connectedCalls / totalCalls) * 100) : 0;
 
   return (
     <AppLayout>
       <div className="page-container">
-        {/* Header */}
-        <div className="page-header">
+        <section className="dashboard-hero">
           <div>
+            <p className="section-eyebrow">Operations overview</p>
             <h1 className="page-title">Admin Dashboard</h1>
-            <p className="page-subtitle">Platform overview & performance metrics</p>
+            <p className="page-subtitle">Platform-wide throughput across users, campaigns, leads, and call outcomes.</p>
           </div>
-          <div style={{ display: 'flex', gap: 8 }}>
+
+          <div className="page-actions">
+            <div className="ops-pill">{activeCampaigns} live campaigns</div>
             <Link to="/admin/campaigns" className="btn btn-primary">
               + New Campaign
             </Link>
           </div>
-        </div>
 
-        {/* Stat Cards */}
+          <div className="metric-ribbon">
+            <div className="metric-ribbon__item">
+              <span className="metric-ribbon__label">Active agents</span>
+              <strong className="metric-ribbon__value">{agents.filter((u) => u.status === 'active').length}</strong>
+              <span className="metric-ribbon__sub">currently dialing or available</span>
+            </div>
+            <div className="metric-ribbon__item">
+              <span className="metric-ribbon__label">7 day connect rate</span>
+              <strong className="metric-ribbon__value">{connectRate}%</strong>
+              <span className="metric-ribbon__sub">connected vs total calls</span>
+            </div>
+            <div className="metric-ribbon__item">
+              <span className="metric-ribbon__label">Callbacks requested</span>
+              <strong className="metric-ribbon__value">{callbackCount}</strong>
+              <span className="metric-ribbon__sub">follow-up pressure to watch</span>
+            </div>
+            <div className="metric-ribbon__item">
+              <span className="metric-ribbon__label">Lead inventory</span>
+              <strong className="metric-ribbon__value">{totalLeads.toLocaleString()}</strong>
+              <span className="metric-ribbon__sub">across all campaigns</span>
+            </div>
+          </div>
+        </section>
+
         <div className="stats-grid">
           <StatCard
             icon={<Users size={22} />} label="Total Users"
@@ -159,77 +186,118 @@ export default function AdminDashboard() {
           />
         </div>
 
-        {/* Tag Breakdown + Agent Status */}
-        <div className="two-col-grid">
-          {/* Disposition Breakdown */}
-          <div className="card">
-            <div className="card-header">
-              <h2 className="card-title">Call Dispositions</h2>
-              <span className="card-subtitle">Last 7 days</span>
-            </div>
-            <div className="card-body">
-              {callData?.tagBreakdown?.length ? (
-                callData.tagBreakdown.map((t: { tag: string; count: number }) => (
-                  <div key={t.tag} className="disposition-row">
-                    <span className="disposition-tag">{t.tag}</span>
-                    <div className="disposition-bar-wrap">
-                      <div
-                        className="disposition-bar"
-                        style={{ width: `${Math.min(100, (t.count / (totalCalls || 1)) * 100)}%` }}
-                      />
+        <div className="dashboard-grid">
+          <div className="dashboard-stack">
+            <div className="card">
+              <div className="card-header card-header--dense">
+                <div>
+                  <div className="card-kicker">Call health</div>
+                  <h2 className="card-title">Disposition Breakdown</h2>
+                </div>
+                <span className="card-subtitle">Last 7 days</span>
+              </div>
+              <div className="card-body">
+                {callData?.tagBreakdown?.length ? (
+                  callData.tagBreakdown.map((t: { tag: string; count: number }) => (
+                    <div key={t.tag} className="disposition-row">
+                      <span className="disposition-tag">{t.tag}</span>
+                      <div className="disposition-bar-wrap">
+                        <div
+                          className="disposition-bar"
+                          style={{ width: `${Math.min(100, (t.count / (totalCalls || 1)) * 100)}%` }}
+                        />
+                      </div>
+                      <span className="disposition-count">{t.count}</span>
                     </div>
-                    <span className="disposition-count">{t.count}</span>
+                  ))
+                ) : (
+                  <div className="empty-state">
+                    <AlertCircle size={32} />
+                    <p>No calls logged yet</p>
                   </div>
-                ))
-              ) : (
+                )}
+              </div>
+            </div>
+
+            <div className="card">
+              <div className="card-header card-header--dense">
+                <div>
+                  <div className="card-kicker">Execution</div>
+                  <h2 className="card-title">Campaign Pipeline</h2>
+                </div>
+                <Link to="/admin/campaigns" className="card-link">View all →</Link>
+              </div>
+              <div className="table-header">
+                <div className="table-col" style={{ flex: 2 }}>Campaign</div>
+                <div className="table-col">Status</div>
+                <div className="table-col">Leads</div>
+                <div className="table-col">Priority</div>
+                <div className="table-col"></div>
+              </div>
+              {campaigns.map((c) => <CampaignRow key={c.id as string} c={c} />)}
+              {campaigns.length === 0 && (
                 <div className="empty-state">
-                  <AlertCircle size={32} />
-                  <p>No calls logged yet</p>
+                  <FolderOpen size={32} />
+                  <p>No campaigns yet. <Link to="/admin/campaigns" style={{ color: 'var(--accent)' }}>Create one →</Link></p>
                 </div>
               )}
             </div>
           </div>
 
-          {/* Agent Status */}
-          <div className="card">
-            <div className="card-header">
-              <h2 className="card-title">Agent Status</h2>
-              <Link to="/admin/users" className="card-link">View all →</Link>
+          <div className="dashboard-stack">
+            <div className="card">
+              <div className="card-header card-header--dense">
+                <div>
+                  <div className="card-kicker">Coverage</div>
+                  <h2 className="card-title">Agent Status</h2>
+                </div>
+                <Link to="/admin/users" className="card-link">View all →</Link>
+              </div>
+              <div className="table-header">
+                <div className="table-col" style={{ flex: 2 }}>Agent</div>
+                <div className="table-col">Status</div>
+                <div className="table-col">Team</div>
+              </div>
+              {agents.slice(0, 8).map((u) => (
+                <AgentRow key={u.id as string} u={u} />
+              ))}
+              {agents.length === 0 && (
+                <div className="empty-state"><AlertCircle size={24} /><p>No agents found</p></div>
+              )}
             </div>
-            <div className="table-header">
-              <div className="table-col" style={{ flex: 2 }}>Agent</div>
-              <div className="table-col">Status</div>
-              <div className="table-col">Team</div>
-            </div>
-            {agents.slice(0, 8).map((u) => (
-              <AgentRow key={u.id as string} u={u} />
-            ))}
-            {agents.length === 0 && (
-              <div className="empty-state"><AlertCircle size={24} /><p>No agents found</p></div>
-            )}
-          </div>
-        </div>
 
-        {/* Campaigns Table */}
-        <div className="card">
-          <div className="card-header">
-            <h2 className="card-title">Campaigns</h2>
-            <Link to="/admin/campaigns" className="card-link">View all →</Link>
-          </div>
-          <div className="table-header">
-            <div className="table-col" style={{ flex: 2 }}>Campaign</div>
-            <div className="table-col">Status</div>
-            <div className="table-col">Leads</div>
-            <div className="table-col">Priority</div>
-            <div className="table-col"></div>
-          </div>
-          {campaigns.map((c) => <CampaignRow key={c.id as string} c={c} />)}
-          {campaigns.length === 0 && (
-            <div className="empty-state">
-              <FolderOpen size={32} />
-              <p>No campaigns yet. <Link to="/admin/campaigns" style={{ color: 'var(--accent)' }}>Create one →</Link></p>
+            <div className="card">
+              <div className="card-header card-header--dense">
+                <div>
+                  <div className="card-kicker">Watchlist</div>
+                  <h2 className="card-title">Operations Signals</h2>
+                </div>
+              </div>
+              <div className="card-body signal-list">
+                <div className="signal-row">
+                  <div className="signal-row__icon signal-row__icon--blue"><TrendingUp size={16} /></div>
+                  <div className="signal-row__body">
+                    <div className="signal-row__label">Connect performance</div>
+                    <div className="signal-row__value">{connectRate}% of calls connected in the last 7 days.</div>
+                  </div>
+                </div>
+                <div className="signal-row">
+                  <div className="signal-row__icon signal-row__icon--amber"><Clock size={16} /></div>
+                  <div className="signal-row__body">
+                    <div className="signal-row__label">Callback queue</div>
+                    <div className="signal-row__value">{callbackCount} leads requested another touchpoint.</div>
+                  </div>
+                </div>
+                <div className="signal-row">
+                  <div className="signal-row__icon signal-row__icon--green"><UserCheck size={16} /></div>
+                  <div className="signal-row__body">
+                    <div className="signal-row__label">Staffing</div>
+                    <div className="signal-row__value">{agents.length} agents mapped across {users.filter((u) => u.role === 'supervisor').length} supervisors.</div>
+                  </div>
+                </div>
+              </div>
             </div>
-          )}
+          </div>
         </div>
       </div>
     </AppLayout>

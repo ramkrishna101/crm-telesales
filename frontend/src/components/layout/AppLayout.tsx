@@ -1,10 +1,10 @@
-import { NavLink, useNavigate } from 'react-router-dom';
+import { NavLink, useLocation, useNavigate } from 'react-router-dom';
 import { useAuthStore } from '../../store/authStore';
 import { authService, agentService } from '../../services/crm.service';
 import toast from 'react-hot-toast';
 import {
   LayoutDashboard, Users, Building2, PhoneCall,
-  BarChart3, Settings, LogOut, ChevronRight, Bell,
+  BarChart3, LogOut, ChevronRight, Bell,
   UserCheck, FolderOpen, ListChecks, Tag
 } from 'lucide-react';
 
@@ -64,8 +64,23 @@ const roleTitles = {
 export default function AppLayout({ children }: { children: React.ReactNode }) {
   const { user, logout, refreshToken, updateUser } = useAuthStore();
   const navigate = useNavigate();
+  const location = useLocation();
   const role = user?.role || 'agent';
   const navItems = roleNavs[role] || agentNav;
+  const activeItem = [...navItems]
+    .sort((left, right) => right.to.length - left.to.length)
+    .find((item) => location.pathname === item.to || location.pathname.startsWith(`${item.to}/`));
+  const todayLabel = new Intl.DateTimeFormat('en-US', {
+    month: 'short',
+    day: 'numeric',
+    weekday: 'short',
+  }).format(new Date());
+  const branchLabel = user?.branchId ? `Branch ${user.branchId.slice(0, 8)}` : 'All branches';
+  const statusLabel = user?.status === 'on_break'
+    ? 'On Break'
+    : user?.status === 'inactive'
+      ? 'Inactive'
+      : 'Active';
 
   const handleLogout = async () => {
     try {
@@ -78,19 +93,17 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
 
   return (
     <div className="app-layout">
-      {/* Sidebar */}
       <aside className="sidebar">
-        {/* Brand */}
         <div className="sidebar-brand">
-          <div className="sidebar-logo">📞</div>
-          <div>
+          <div className="sidebar-logo">TC</div>
+          <div className="sidebar-brand-copy">
             <div className="sidebar-brand-name">TeleCRM</div>
-            <div className="sidebar-role-badge">{roleTitles[role]}</div>
+            <div className="sidebar-role-badge">Revenue Ops Console</div>
           </div>
         </div>
 
-        {/* Nav */}
         <nav className="sidebar-nav">
+          <div className="sidebar-nav-section">Workspace</div>
           {navItems.map((item) => (
             <NavLink
               key={item.to}
@@ -107,12 +120,11 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
           ))}
         </nav>
 
-        {/* User footer */}
-        <div className="sidebar-footer" style={{ flexDirection: 'column', alignItems: 'stretch' }}>
+        <div className="sidebar-footer">
           {role === 'agent' && (
-            <div style={{ marginBottom: 16, paddingBottom: 16, borderBottom: '1px solid rgba(255,255,255,0.05)', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-              <span style={{ fontSize: '0.85rem', color: 'var(--text-secondary)' }}>Status</span>
-              <button 
+            <div className="sidebar-quick-status">
+              <span className="sidebar-quick-status__label">Status</span>
+              <button
                 onClick={async () => {
                   try {
                     const isBreak = user?.status === 'on_break';
@@ -123,33 +135,50 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
                     toast.error(err.response?.data?.error?.message || 'Failed to update status');
                   }
                 }}
-                className={`badge ${user?.status === 'on_break' ? 'badge--warning' : 'badge--success'}`} 
-                style={{ cursor: 'pointer', border: 'none', transition: '0.2s', padding: '4px 8px' }}
+                className={`badge sidebar-status-toggle ${user?.status === 'on_break' ? 'badge--warning' : 'badge--success'}`}
                 title="Click to toggle break"
               >
                 {user?.status === 'on_break' ? 'On Break' : 'Active'}
               </button>
             </div>
           )}
-          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '8px' }}>
-            <div className="sidebar-user" style={{ flex: 1, minWidth: 0 }}>
+
+          <div className="sidebar-user-row">
+            <div className="sidebar-user">
               <div className="sidebar-avatar">
                 {user?.name?.charAt(0).toUpperCase() || '?'}
               </div>
-              <div className="sidebar-user-info" style={{ overflow: 'hidden' }}>
-                <div className="sidebar-user-name" style={{ whiteSpace: 'nowrap', textOverflow: 'ellipsis', overflow: 'hidden' }}>{user?.name}</div>
-                <div className="sidebar-user-email" style={{ whiteSpace: 'nowrap', textOverflow: 'ellipsis', overflow: 'hidden' }}>{user?.email}</div>
+              <div className="sidebar-user-info">
+                <div className="sidebar-user-name">{user?.name}</div>
+                <div className="sidebar-user-email">{user?.email}</div>
               </div>
             </div>
-            <button className="sidebar-logout" onClick={handleLogout} title="Log out" style={{ flexShrink: 0 }}>
+            <button className="sidebar-logout" onClick={handleLogout} title="Log out">
               <LogOut size={16} />
             </button>
           </div>
         </div>
       </aside>
 
-      {/* Main */}
       <main className="main-content">
+        <div className="shell-topbar">
+          <div className="shell-topbar__title-group">
+            <div className="shell-topbar__eyebrow">{roleTitles[role]}</div>
+            <div className="shell-topbar__title">{activeItem?.label || roleTitles[role]}</div>
+          </div>
+
+          <div className="shell-topbar__meta">
+            <span className="ops-pill">{branchLabel}</span>
+            <span className={`ops-pill ${user?.status === 'on_break' ? 'ops-pill--warning' : 'ops-pill--success'}`}>
+              {statusLabel}
+            </span>
+            <span className="ops-pill">{todayLabel}</span>
+            <button className="shell-topbar__icon" type="button" aria-label="Notifications">
+              <Bell size={16} />
+            </button>
+          </div>
+        </div>
+
         {children}
       </main>
     </div>
