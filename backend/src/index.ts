@@ -26,6 +26,39 @@ import { redis } from './lib/redis';
 const DEFAULT_BRANCH_CODE = 'primary';
 const HEALTHCHECK_TIMEOUT_MS = 1000;
 
+const configuredOrigins = (process.env.FRONTEND_URL || '')
+  .split(',')
+  .map((origin) => origin.trim())
+  .filter(Boolean);
+
+const defaultOrigins = process.env.NODE_ENV === 'production' ? [] : ['http://localhost:5173'];
+const allowedOrigins = new Set([...defaultOrigins, ...configuredOrigins]);
+
+function isAllowedOrigin(origin?: string) {
+  if (!origin) return true;
+  if (allowedOrigins.has(origin)) return true;
+
+  if (process.env.NODE_ENV === 'production') {
+    try {
+      const { hostname } = new URL(origin);
+      return hostname.endsWith('.up.railway.app');
+    } catch {
+      return false;
+    }
+  }
+
+  return false;
+}
+
+function corsOrigin(origin: string | undefined, callback: (err: Error | null, allow?: boolean) => void) {
+  if (isAllowedOrigin(origin)) {
+    callback(null, true);
+    return;
+  }
+
+  callback(new Error('Origin not allowed by CORS'));
+}
+
 const app = express();
 app.set('trust proxy', 1); // Required for express-rate-limit behind Railway/Render proxy
 const httpServer = createServer(app);
@@ -33,7 +66,7 @@ const httpServer = createServer(app);
 // ── Socket.io Setup ───────────────────────────────────────────────────
 const io = new SocketServer(httpServer, {
   cors: {
-    origin: process.env.FRONTEND_URL || 'http://localhost:5173',
+    origin: corsOrigin,
     methods: ['GET', 'POST'],
     credentials: true,
   },
@@ -69,7 +102,7 @@ export { io };
 // ── Express Middleware ────────────────────────────────────────────────
 app.use(helmet());
 app.use(cors({
-  origin: process.env.FRONTEND_URL || 'http://localhost:5173',
+  origin: corsOrigin,
   credentials: true,
 }));
 app.use(express.json({ limit: '10mb' }));
