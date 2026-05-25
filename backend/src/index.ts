@@ -24,6 +24,7 @@ import { prisma } from './lib/prisma';
 import { redis } from './lib/redis';
 
 const DEFAULT_BRANCH_CODE = 'primary';
+const HEALTHCHECK_TIMEOUT_MS = 1000;
 
 const app = express();
 app.set('trust proxy', 1); // Required for express-rate-limit behind Railway/Render proxy
@@ -83,23 +84,35 @@ const authLimiter = rateLimit({
   message: { success: false, error: { code: 'RATE_LIMITED', message: 'Too many requests, slow down' } },
 });
 
+function withTimeout<T>(promise: Promise<T>, timeoutMs: number, fallbackValue: T): Promise<T> {
+  return new Promise((resolve) => {
+    const timer = setTimeout(() => resolve(fallbackValue), timeoutMs);
+
+    promise
+      .then((value) => resolve(value))
+      .catch(() => resolve(fallbackValue))
+      .finally(() => clearTimeout(timer));
+  });
+}
+
 // ── Health Check ──────────────────────────────────────────────────────
 app.get('/health', async (_req, res) => {
-  let redisOk = false;
-  let userCount = -1;
-  try {
-    await redis.ping();
-    redisOk = true;
-  } catch {}
+  const redisStatus = await withTimeout(
+    redis.ping().then(() => 'ok').catch(() => 'error'),
+    HEALTHCHECK_TIMEOUT_MS,
+    'timeout'
+  );
 
-  try {
-    userCount = await prisma.user.count();
-  } catch {}
+  const userCount = await withTimeout(
+    prisma.user.count(),
+    HEALTHCHECK_TIMEOUT_MS,
+    -1
+  );
 
   res.json({
     status: 'ok',
     timestamp: new Date().toISOString(),
-    services: { redis: redisOk ? 'ok' : 'error' },
+    services: { redis: redisStatus },
     db: { users: userCount }
   });
 });
