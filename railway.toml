@@ -2,6 +2,7 @@
 builder = "DOCKERFILE"
 
 [deploy]
+preDeployCommand = ["/app/backend/node_modules/.bin/prisma migrate deploy --schema /app/backend/prisma/schema.prisma"]
 healthcheckPath = "/health"
 healthcheckTimeout = 100
 restartPolicyType = "ON_FAILURE"

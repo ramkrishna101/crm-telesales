@@ -32,4 +32,4 @@ RUN mkdir -p /app/backend/uploads
 
 EXPOSE 4000
 
-CMD ["sh", "-c", "cd backend && npx prisma migrate deploy && node dist/index.js"]
+CMD ["node", "backend/dist/index.js"]
