@@ -2,7 +2,6 @@
 builder = "DOCKERFILE"
 
 [deploy]
-startCommand = "cd backend && npx prisma migrate deploy && node dist/index.js"
 healthcheckPath = "/health"
 healthcheckTimeout = 100
 restartPolicyType = "ON_FAILURE"
