@@ -1,0 +1,12 @@
+.git
+.gitignore
+node_modules
+backend/node_modules
+frontend/node_modules
+testing-agent/node_modules
+backend/dist
+frontend/dist
+backend/uploads
+.env
+backend/.env
+frontend/.env*
