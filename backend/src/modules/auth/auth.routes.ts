@@ -15,14 +15,12 @@ import {
 } from '../../lib/redis';
 import { authenticate } from '../../middleware/auth';
 import { AppError } from '../../middleware/errorHandler';
+import { isSuperAdmin } from '../../lib/access';
 
 const router = Router();
 
-// ── Validation Schemas ────────────────────────────────────────────────
-
 const loginSchema = z.object({
   email: z.string().email().max(255),
-  // max(128) prevents bcrypt DoS: very long passwords cause excessive CPU during hashing
   password: z.string().min(1).max(128),
 });
 
@@ -30,15 +28,12 @@ const refreshSchema = z.object({
   refreshToken: z.string().min(1),
 });
 
-// ── POST /api/auth/login ──────────────────────────────────────────────
-
 router.post('/login', async (req: Request, res: Response, next: NextFunction) => {
   try {
     const { email, password } = loginSchema.parse(req.body);
 
     const user = await prisma.user.findUnique({ where: { email } });
-    // Inactive status blocks agents/supervisors, but admins can always log in
-    if (!user || (user.status === 'inactive' && user.role !== 'admin')) {
+    if (!user || (user.status === 'inactive' && !isSuperAdmin(user.role))) {
       throw new AppError(401, 'INVALID_CREDENTIALS', 'Invalid email or password');
     }
 
@@ -47,17 +42,15 @@ router.post('/login', async (req: Request, res: Response, next: NextFunction) =>
       throw new AppError(401, 'INVALID_CREDENTIALS', 'Invalid email or password');
     }
 
-    // Auto-set status to active on login if they are not inactive
     if (user.status === 'offline') {
       await prisma.user.update({ where: { id: user.id }, data: { status: 'active' } });
       user.status = 'active';
     }
 
-    const payload = { userId: user.id, role: user.role, email: user.email };
+    const payload = { userId: user.id, role: user.role, email: user.email, branchId: user.branchId };
     const accessToken = signAccessToken(payload);
     const refreshToken = signRefreshToken(payload);
 
-    // Store refresh token in Redis
     await storeRefreshToken(user.id, refreshToken, getRefreshTokenTtlSeconds());
 
     res.json({
@@ -70,6 +63,7 @@ router.post('/login', async (req: Request, res: Response, next: NextFunction) =>
           name: user.name,
           email: user.email,
           role: user.role,
+          branchId: user.branchId,
           teamId: user.teamId,
           status: user.status,
         },
@@ -79,8 +73,6 @@ router.post('/login', async (req: Request, res: Response, next: NextFunction) =>
     next(err);
   }
 });
-
-// ── POST /api/auth/refresh ────────────────────────────────────────────
 
 router.post('/refresh', async (req: Request, res: Response, next: NextFunction) => {
   try {
@@ -98,10 +90,17 @@ router.post('/refresh', async (req: Request, res: Response, next: NextFunction) 
       throw new AppError(401, 'TOKEN_REVOKED', 'Refresh token has been revoked');
     }
 
-    // Rotate tokens — revoke old, issue new
     await revokeRefreshToken(payload.userId, refreshToken);
 
-    const newPayload = { userId: payload.userId, role: payload.role, email: payload.email };
+    const user = await prisma.user.findUnique({
+      where: { id: payload.userId },
+      select: { id: true, email: true, role: true, branchId: true },
+    });
+    if (!user) {
+      throw new AppError(401, 'INVALID_TOKEN', 'Refresh token user no longer exists');
+    }
+
+    const newPayload = { userId: user.id, role: user.role, email: user.email, branchId: user.branchId };
     const newAccessToken = signAccessToken(newPayload);
     const newRefreshToken = signRefreshToken(newPayload);
     await storeRefreshToken(payload.userId, newRefreshToken, getRefreshTokenTtlSeconds());
@@ -115,38 +114,36 @@ router.post('/refresh', async (req: Request, res: Response, next: NextFunction) 
   }
 });
 
-// ── POST /api/auth/logout ─────────────────────────────────────────────
-
 router.post('/logout', authenticate, async (req: Request, res: Response, next: NextFunction) => {
   try {
     const { refreshToken } = refreshSchema.parse(req.body);
     if (req.user) {
       await revokeRefreshToken(req.user.userId, refreshToken);
-      
-      const u = await prisma.user.findUnique({ where: { id: req.user.userId } });
-      if (u) {
-        if (u.status === 'on_break') {
+
+      const user = await prisma.user.findUnique({ where: { id: req.user.userId } });
+      if (user) {
+        if (user.status === 'on_break') {
           const openBreak = await prisma.breakLog.findFirst({
             where: { agentId: req.user.userId, endedAt: null },
-            orderBy: { startedAt: 'desc' }
+            orderBy: { startedAt: 'desc' },
           });
           if (openBreak) {
             await prisma.breakLog.update({ where: { id: openBreak.id }, data: { endedAt: new Date() } });
           }
         }
+
         await prisma.user.update({
           where: { id: req.user.userId },
-          data: { status: 'offline', breakStartedAt: null }
+          data: { status: 'offline', breakStartedAt: null },
         });
       }
     }
+
     res.json({ success: true, data: { message: 'Logged out successfully' } });
   } catch (err) {
     next(err);
   }
 });
-
-// ── GET /api/auth/me ──────────────────────────────────────────────────
 
 router.get('/me', authenticate, async (req: Request, res: Response, next: NextFunction) => {
   try {
@@ -157,10 +154,12 @@ router.get('/me', authenticate, async (req: Request, res: Response, next: NextFu
         name: true,
         email: true,
         role: true,
+        branchId: true,
         teamId: true,
         status: true,
         createdAt: true,
         team: { select: { id: true, name: true } },
+        branch: { select: { id: true, name: true, code: true } },
       },
     });
     if (!user) throw new AppError(404, 'USER_NOT_FOUND', 'User not found');

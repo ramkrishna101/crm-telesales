@@ -7,6 +7,7 @@ import { authenticate, requireRole } from '../../middleware/auth';
 import { AppError } from '../../middleware/errorHandler';
 import { param } from '../../lib/params';
 import { leadUploadQueue, getUploadProgress } from '../../jobs/leadUpload.worker';
+import { ADMIN_ROLES, assertBranchAccess, getUserBranchId, isSuperAdmin } from '../../lib/access';
 
 const router = Router();
 router.use(authenticate);
@@ -41,7 +42,7 @@ const upload = multer({
 
 router.post(
   '/upload/:campaignId',
-  requireRole('admin'),
+  requireRole(...ADMIN_ROLES),
   upload.single('file'),
   async (req: Request, res: Response, next: NextFunction) => {
     try {
@@ -50,6 +51,7 @@ router.post(
       const campaignId = param(req, 'campaignId');
       const campaign = await prisma.campaign.findUnique({ where: { id: campaignId } });
       if (!campaign) throw new AppError(404, 'CAMPAIGN_NOT_FOUND', 'Campaign not found');
+      assertBranchAccess(req.user!, campaign.branchId);
       if (campaign.status === 'closed') throw new AppError(400, 'CAMPAIGN_CLOSED', 'Cannot upload to a closed campaign');
 
       const job = await leadUploadQueue.add('process-leads', {
@@ -75,7 +77,7 @@ router.post(
 
 // ── GET /api/leads/upload/status/:jobId ───────────────────────────────
 
-router.get('/upload/status/:jobId', requireRole('admin', 'supervisor'), async (req: Request, res: Response, next: NextFunction) => {
+router.get('/upload/status/:jobId', requireRole(...ADMIN_ROLES, 'supervisor'), async (req: Request, res: Response, next: NextFunction) => {
   try {
     const jobId = param(req, 'jobId');
     const progress = await getUploadProgress(jobId);
@@ -103,6 +105,8 @@ router.get('/', async (req: Request, res: Response, next: NextFunction) => {
       where.assignedToId = userId;
     } else if (callerRole === 'supervisor') {
       where = { campaign: { team: { supervisorId: userId } } };
+    } else if (!isSuperAdmin(callerRole)) {
+      where.branchId = getUserBranchId(req.user!);
     }
 
     if (campaignId) where.campaignId = campaignId;
@@ -205,7 +209,7 @@ const assignSchema = z.object({
   agentId: z.string().uuid(),
 });
 
-router.post('/assign', requireRole('admin', 'supervisor'), async (req: Request, res: Response, next: NextFunction) => {
+router.post('/assign', requireRole(...ADMIN_ROLES, 'supervisor'), async (req: Request, res: Response, next: NextFunction) => {
   try {
     const { leadIds, agentId } = assignSchema.parse(req.body);
 
@@ -227,7 +231,7 @@ router.post('/assign', requireRole('admin', 'supervisor'), async (req: Request, 
 // ── POST /api/leads/assign-campaign ───────────────────────────────────────
 // Admin assigns ALL unassigned leads in a campaign to an agent in one click
 
-router.post('/assign-campaign', requireRole('admin', 'supervisor'), async (req: Request, res: Response, next: NextFunction) => {
+router.post('/assign-campaign', requireRole(...ADMIN_ROLES, 'supervisor'), async (req: Request, res: Response, next: NextFunction) => {
   try {
     const { campaignId, agentId } = z.object({
       campaignId: z.string().uuid(),
@@ -257,7 +261,7 @@ router.post('/assign-campaign', requireRole('admin', 'supervisor'), async (req: 
 // ── POST /api/leads/reclaim ────────────────────────────────────────────
 // Admin reclaims leads from agent (keeps in DB, unassigns)
 
-router.post('/reclaim', requireRole('admin', 'supervisor'), async (req: Request, res: Response, next: NextFunction) => {
+router.post('/reclaim', requireRole(...ADMIN_ROLES, 'supervisor'), async (req: Request, res: Response, next: NextFunction) => {
   try {
     const { leadIds } = z.object({ leadIds: z.array(z.string().uuid()).min(1) }).parse(req.body);
 

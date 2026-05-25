@@ -5,6 +5,7 @@ export interface JwtPayload {
   userId: string;
   role: Role;
   email: string;
+  branchId: string | null;
 }
 
 // ── Secret validation at startup ─────────────────────────────────────

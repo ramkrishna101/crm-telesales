@@ -1,7 +1,8 @@
-import { PrismaClient, Role, CampaignType, CampaignStatus, Priority } from '@prisma/client';
+import { PrismaClient, Role, CampaignType, CampaignStatus, Priority, BranchStatus } from '@prisma/client';
 import bcrypt from 'bcryptjs';
 
 const prisma = new PrismaClient();
+const DEFAULT_BRANCH_CODE = 'primary';
 
 const SYSTEM_TAGS = [
   { name: 'RNR', colour: '#f59e0b', isSystem: true },
@@ -15,6 +16,17 @@ const SYSTEM_TAGS = [
 
 async function main() {
   console.log('🌱 Seeding database...');
+
+  const defaultBranch = await prisma.branch.upsert({
+    where: { code: DEFAULT_BRANCH_CODE },
+    update: {},
+    create: {
+      name: 'Primary',
+      code: DEFAULT_BRANCH_CODE,
+      status: BranchStatus.active,
+    },
+  });
+  console.log('✅ Default branch seeded');
 
   // ── System Disposition Tags ──────────────────────────────────────
   for (const tag of SYSTEM_TAGS) {
@@ -35,7 +47,8 @@ async function main() {
       name: 'Super Admin',
       email: 'admin@crm.com',
       passwordHash: adminPassword,
-      role: Role.admin,
+      role: Role.super_admin,
+      branchId: defaultBranch.id,
     },
   });
   console.log('✅ Admin created: admin@crm.com / admin@123');
@@ -50,6 +63,7 @@ async function main() {
       email: 'supervisor@crm.com',
       passwordHash: supervisorPassword,
       role: Role.supervisor,
+      branchId: defaultBranch.id,
     },
   });
 
@@ -59,6 +73,7 @@ async function main() {
     create: {
       id: 'team-alpha-001',
       name: 'Team Alpha',
+      branchId: defaultBranch.id,
       supervisorId: supervisor.id,
     },
   });
@@ -87,6 +102,7 @@ async function main() {
         email: agentData.email,
         passwordHash: agentPassword,
         role: Role.agent,
+        branchId: defaultBranch.id,
         teamId: team.id,
       },
     });
@@ -104,6 +120,7 @@ async function main() {
       type: CampaignType.standard,
       status: CampaignStatus.active,
       priority: Priority.normal,
+      branchId: defaultBranch.id,
       createdById: admin.id,
     },
   });

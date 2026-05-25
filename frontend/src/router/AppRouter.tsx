@@ -7,7 +7,12 @@ import UnauthorizedPage from '../pages/auth/UnauthorizedPage';
 function RootRedirect() {
   const { user, isAuthenticated } = useAuthStore();
   if (!isAuthenticated || !user) return <Navigate to="/login" replace />;
-  const roleRedirects = { admin: '/admin', supervisor: '/supervisor', agent: '/agent' };
+  const roleRedirects = {
+    super_admin: '/admin',
+    branch_admin: '/admin',
+    supervisor: '/supervisor',
+    agent: '/agent',
+  };
   return <Navigate to={roleRedirects[user.role] || '/login'} replace />;
 }
 
@@ -19,6 +24,7 @@ import CampaignsPage from '../pages/admin/CampaignsPage';
 import LeadsPage from '../pages/admin/LeadsPage';
 import TagsPage from '../pages/admin/TagsPage';
 import AnalyticsPage from '../pages/admin/AnalyticsPage';
+import BranchesPage from '../pages/admin/BranchesPage';
 
 // Supervisor
 import SupervisorDashboard from '../pages/supervisor/SupervisorDashboard';
@@ -46,7 +52,11 @@ export default function AppRouter() {
       <Route path="/unauthorized" element={<UnauthorizedPage />} />
 
       {/* ── Admin ────────────────────────────────────────────────────── */}
-      <Route element={<RoleRoute allowedRoles={['admin']} />}>
+      <Route element={<RoleRoute allowedRoles={['super_admin']} />}>
+        <Route path="/admin/branches" element={<BranchesPage />} />
+      </Route>
+
+      <Route element={<RoleRoute allowedRoles={['super_admin', 'branch_admin']} />}>
         <Route path="/admin" element={<AdminDashboard />} />
         <Route path="/admin/users" element={<UsersPage />} />
         <Route path="/admin/teams" element={<TeamsPage />} />

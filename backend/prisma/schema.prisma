@@ -14,9 +14,15 @@ datasource db {
 // ── Enums ────────────────────────────────────────────────────────────
 
 enum Role {
-  admin
+  super_admin
+  branch_admin
   supervisor
   agent
+}
+
+enum BranchStatus {
+  active
+  inactive
 }
 
 enum UserStatus {
@@ -61,9 +67,29 @@ enum FollowUpStatus {
 
 // ── Models ───────────────────────────────────────────────────────────
 
+model Branch {
+  id            String       @id @default(uuid())
+  name          String
+  code          String       @unique
+  status        BranchStatus @default(active)
+  branchAdmin   User?        @relation("BranchAdmin", fields: [branchAdminId], references: [id])
+  branchAdminId String?      @unique
+  createdAt     DateTime     @default(now())
+  updatedAt     DateTime     @updatedAt
+
+  users         User[]
+  teams         Team[]
+  campaigns     Campaign[]
+  leads         Lead[]
+
+  @@map("branches")
+}
+
 model Team {
   id           String   @id @default(uuid())
   name         String
+  branch       Branch   @relation(fields: [branchId], references: [id])
+  branchId     String
   supervisor   User?    @relation("TeamSupervisor", fields: [supervisorId], references: [id])
   supervisorId String?
   createdAt    DateTime @default(now())
@@ -80,6 +106,8 @@ model User {
   email          String     @unique
   passwordHash   String
   role           Role
+  branch         Branch?    @relation(fields: [branchId], references: [id])
+  branchId       String?
   team           Team?      @relation("TeamMembers", fields: [teamId], references: [id])
   teamId         String?
   status         UserStatus @default(offline)
@@ -89,6 +117,7 @@ model User {
 
   // Supervisor back-ref
   supervisorOfTeam Team[] @relation("TeamSupervisor")
+  administeredBranch Branch? @relation("BranchAdmin")
 
   // Relations
   createdCampaigns  Campaign[]        @relation("CampaignCreator")
@@ -111,6 +140,8 @@ model Campaign {
   status      CampaignStatus @default(active)
   priority    Priority       @default(normal)
   script      String?        // Rich-text HTML for call script (Phase 3)
+  branch      Branch         @relation(fields: [branchId], references: [id])
+  branchId    String
   createdBy   User           @relation("CampaignCreator", fields: [createdById], references: [id])
   createdById String
   team        Team?          @relation(fields: [teamId], references: [id])
@@ -140,9 +171,11 @@ model CampaignAgent {
 
 model Lead {
   id           String     @id @default(uuid())
+  branch       Branch     @relation(fields: [branchId], references: [id])
+  branchId     String
   campaign     Campaign   @relation(fields: [campaignId], references: [id])
   campaignId   String
-  phone        String     @unique // Stored plain; masking happens at API layer
+  phone        String     // Stored plain; masking happens at API layer
   email        String?
   name         String?
   customFields Json?      // Extra CSV columns stored as JSONB
@@ -161,6 +194,7 @@ model Lead {
 
   // Indexes
   @@index([assignedToId])
+  @@index([branchId])
   @@index([campaignId, status])
   @@index([campaignId, assignedToId])
   @@map("leads")

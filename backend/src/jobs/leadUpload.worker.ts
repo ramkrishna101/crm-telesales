@@ -95,6 +95,14 @@ export function startLeadUploadWorker() {
 
       await setUploadProgress(job.id!, { status: 'importing', total, inserted: 0, skipped: 0 });
 
+      const campaign = await prisma.campaign.findUnique({
+        where: { id: campaignId },
+        select: { branchId: true },
+      });
+      if (!campaign) {
+        throw new Error(`Campaign ${campaignId} not found`);
+      }
+
       // ── Distribution Logic ──────────────────────────────────────────
       // Fetch all agents assigned to this campaign for auto-distribution
       const campaignAgents = await prisma.campaignAgent.findMany({
@@ -144,6 +152,7 @@ export function startLeadUploadWorker() {
           }
           
           return {
+            branchId: campaign.branchId,
             campaignId,
             phone: l.phone,
             email: l.email,

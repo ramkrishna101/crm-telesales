@@ -6,6 +6,7 @@ import { authenticate, requireRole } from '../../middleware/auth';
 import { AppError } from '../../middleware/errorHandler';
 import { param } from '../../lib/params';
 import { io } from '../../index';
+import { ADMIN_ROLES, assertBranchAccess, getUserBranchId, isSuperAdmin } from '../../lib/access';
 
 const router = Router();
 router.use(authenticate);
@@ -122,19 +123,20 @@ router.get('/', async (req: Request, res: Response, next: NextFunction) => {
     if (callerRole === 'agent') {
       where.agentId = userId;
     } else if (callerRole === 'supervisor') {
-      const myTeams = await prisma.team.findMany({
-        where: { supervisorId: userId },
-        select: { members: { select: { id: true } } },
-      });
-      const agentIds = myTeams.flatMap((t) => t.members.map((m) => m.id));
+      const agentIds = await getSupervisorAgentIds(userId);
       where.agentId = { in: agentIds };
+    } else if (!isSuperAdmin(callerRole)) {
+      where.lead = { branchId: getUserBranchId(req.user!) };
     }
 
     if (agentId && callerRole !== 'agent') where.agentId = agentId;
     if (leadId) where.leadId = leadId;
     if (tag) where.dispositionTag = tag;
     if (dateFilter) where.calledAt = dateFilter;
-    if (campaignId) where.lead = { campaignId };
+    if (campaignId) {
+      const existingLeadFilter = (where.lead as Record<string, unknown>) || {};
+      where.lead = { ...existingLeadFilter, campaignId };
+    }
 
     const [logs, total] = await Promise.all([
       prisma.callLog.findMany({
@@ -168,9 +170,10 @@ router.get('/', async (req: Request, res: Response, next: NextFunction) => {
 // ── GET /api/calls/summary ────────────────────────────────────────────
 // Hourly heatmap + tag breakdown for analytics
 
-router.get('/summary', requireRole('admin', 'supervisor'), async (req: Request, res: Response, next: NextFunction) => {
+router.get('/summary', requireRole(...ADMIN_ROLES, 'supervisor'), async (req: Request, res: Response, next: NextFunction) => {
   try {
     const { from, to, agentId, campaignId } = req.query as Record<string, string>;
+    const { role: callerRole, userId } = req.user!;
 
     let dateFilter: Record<string, Date> | undefined;
     if (from && to) {
@@ -182,11 +185,33 @@ router.get('/summary', requireRole('admin', 'supervisor'), async (req: Request, 
       dateFilter = { gte: new Date(Date.now() - 7 * 24 * 60 * 60 * 1000) };
     }
 
+    const scopedAgentIds = callerRole === 'supervisor'
+      ? await getSupervisorAgentIds(userId)
+      : undefined;
+    const branchId = !isSuperAdmin(callerRole) ? getUserBranchId(req.user!) : undefined;
+
     const whereClause = {
       calledAt: dateFilter,
       ...(agentId ? { agentId } : {}),
-      ...(campaignId ? { lead: { campaignId } } : {}),
+      ...(scopedAgentIds ? { agentId: { in: scopedAgentIds } } : {}),
+      ...(branchId || campaignId
+        ? {
+            lead: {
+              ...(branchId ? { branchId } : {}),
+              ...(campaignId ? { campaignId } : {}),
+            },
+          }
+        : {}),
     };
+
+    const rawDateUpperClause = dateFilter.lte ? Prisma.sql`AND cl."calledAt" <= ${dateFilter.lte}` : Prisma.empty;
+    const rawAgentClause = agentId
+      ? Prisma.sql`AND cl."agentId" = ${agentId}`
+      : scopedAgentIds
+        ? Prisma.sql`AND cl."agentId" IN (${Prisma.join(scopedAgentIds)})`
+        : Prisma.empty;
+    const rawBranchClause = branchId ? Prisma.sql`AND l."branchId" = ${branchId}` : Prisma.empty;
+    const rawCampaignClause = campaignId ? Prisma.sql`AND l."campaignId" = ${campaignId}` : Prisma.empty;
 
     const [tagBreakdown, hourlyHeatmap, dailyTotals, agentLeaderboard] = await Promise.all([
       // Calls by disposition tag
@@ -198,30 +223,31 @@ router.get('/summary', requireRole('admin', 'supervisor'), async (req: Request, 
       }),
 
       // Heatmap: calls by hour of day (converted to IST)
-      agentId
-        ? prisma.$queryRaw<Array<{ hour: number; count: bigint }>>`
-            SELECT EXTRACT(HOUR FROM "calledAt" AT TIME ZONE 'UTC' AT TIME ZONE 'Asia/Kolkata') as hour, COUNT(*) as count
-            FROM call_logs
-            WHERE "calledAt" >= ${dateFilter.gte} AND "calledAt" <= ${dateFilter.lte ?? new Date()}
-            AND "agentId" = ${agentId}
-            GROUP BY EXTRACT(HOUR FROM "calledAt" AT TIME ZONE 'UTC' AT TIME ZONE 'Asia/Kolkata')
-            ORDER BY hour
-          `
-        : prisma.$queryRaw<Array<{ hour: number; count: bigint }>>`
-            SELECT EXTRACT(HOUR FROM "calledAt" AT TIME ZONE 'UTC' AT TIME ZONE 'Asia/Kolkata') as hour, COUNT(*) as count
-            FROM call_logs
-            WHERE "calledAt" >= ${dateFilter.gte} AND "calledAt" <= ${dateFilter.lte ?? new Date()}
-            GROUP BY EXTRACT(HOUR FROM "calledAt" AT TIME ZONE 'UTC' AT TIME ZONE 'Asia/Kolkata')
-            ORDER BY hour
-          `,
+      prisma.$queryRaw<Array<{ hour: number; count: bigint }>>`
+        SELECT EXTRACT(HOUR FROM cl."calledAt" AT TIME ZONE 'UTC' AT TIME ZONE 'Asia/Kolkata') as hour, COUNT(*) as count
+        FROM call_logs cl
+        JOIN leads l ON cl."leadId" = l.id
+        WHERE cl."calledAt" >= ${dateFilter.gte}
+        ${rawDateUpperClause}
+        ${rawAgentClause}
+        ${rawBranchClause}
+        ${rawCampaignClause}
+        GROUP BY EXTRACT(HOUR FROM cl."calledAt" AT TIME ZONE 'UTC' AT TIME ZONE 'Asia/Kolkata')
+        ORDER BY hour
+      `,
 
       // Daily call volume (converted to IST)
       prisma.$queryRaw<Array<{ date: string; count: bigint; avgDuration: number }>>`
-        SELECT DATE("calledAt" AT TIME ZONE 'UTC' AT TIME ZONE 'Asia/Kolkata') as date, COUNT(*) as count,
-               ROUND(AVG("durationSeconds")) as "avgDuration"
-        FROM call_logs
-        WHERE "calledAt" >= ${dateFilter.gte}
-        GROUP BY DATE("calledAt" AT TIME ZONE 'UTC' AT TIME ZONE 'Asia/Kolkata') ORDER BY date
+         SELECT DATE(cl."calledAt" AT TIME ZONE 'UTC' AT TIME ZONE 'Asia/Kolkata') as date, COUNT(*) as count,
+           ROUND(AVG(cl."durationSeconds")) as "avgDuration"
+         FROM call_logs cl
+         JOIN leads l ON cl."leadId" = l.id
+         WHERE cl."calledAt" >= ${dateFilter.gte}
+         ${rawDateUpperClause}
+         ${rawAgentClause}
+         ${rawBranchClause}
+         ${rawCampaignClause}
+         GROUP BY DATE(cl."calledAt" AT TIME ZONE 'UTC' AT TIME ZONE 'Asia/Kolkata') ORDER BY date
       `,
 
       // Agent leaderboard with disposition breakdown
@@ -243,7 +269,12 @@ router.get('/summary', requireRole('admin', 'supervisor'), async (req: Request, 
           SUM(CASE WHEN cl."dispositionTag" = 'Invalid Number' THEN 1 ELSE 0 END) as invalid,
           ROUND(AVG(cl."durationSeconds")) as "avgDuration"
         FROM users u JOIN call_logs cl ON cl."agentId" = u.id
-        WHERE cl."calledAt" >= ${dateFilter.gte} ${dateFilter.lte ? Prisma.sql`AND cl."calledAt" <= ${dateFilter.lte}` : Prisma.empty}
+        JOIN leads l ON cl."leadId" = l.id
+        WHERE cl."calledAt" >= ${dateFilter.gte}
+        ${rawDateUpperClause}
+        ${rawAgentClause}
+        ${rawBranchClause}
+        ${rawCampaignClause}
         GROUP BY u.id, u.name ORDER BY calls DESC LIMIT 20
       `,
     ]);
@@ -278,10 +309,11 @@ router.get('/:id', async (req: Request, res: Response, next: NextFunction) => {
       where: { id },
       include: {
         agent: { select: { id: true, name: true } },
-        lead: { select: { id: true, name: true, phone: true, campaignId: true } },
+        lead: { select: { id: true, name: true, phone: true, campaignId: true, branchId: true } },
       },
     });
     if (!log) throw new AppError(404, 'LOG_NOT_FOUND', 'Call log not found');
+    assertBranchAccess(req.user!, log.lead.branchId);
     if (req.user!.role === 'agent' && log.agentId !== req.user!.userId) {
       throw new AppError(403, 'FORBIDDEN', 'Access denied');
     }
@@ -290,5 +322,14 @@ router.get('/:id', async (req: Request, res: Response, next: NextFunction) => {
     next(err);
   }
 });
+
+async function getSupervisorAgentIds(supervisorId: string): Promise<string[]> {
+  const teams = await prisma.team.findMany({
+    where: { supervisorId },
+    select: { members: { select: { id: true } } },
+  });
+
+  return teams.flatMap((team) => team.members.map((member) => member.id));
+}
 
 export default router;

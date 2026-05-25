@@ -50,7 +50,8 @@ export default function LoginPage() {
       setAuth(user, accessToken, refreshToken);
 
       const from = (location.state as { from?: { pathname: string } })?.from?.pathname;
-      const destination = from || ROLE_REDIRECTS[user.role as keyof typeof ROLE_REDIRECTS] || '/';
+      const isUsableFrom = from && from !== '/' && from !== '/login';
+      const destination = isUsableFrom ? from : ROLE_REDIRECTS[user.role as keyof typeof ROLE_REDIRECTS] || '/admin';
       navigate(destination, { replace: true });
       toast.success(`Welcome back, ${user.name}!`);
     } catch (err: unknown) {

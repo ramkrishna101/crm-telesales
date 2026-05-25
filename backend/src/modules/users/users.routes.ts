@@ -6,6 +6,7 @@ import { authenticate, requireRole } from '../../middleware/auth';
 import { AppError } from '../../middleware/errorHandler';
 import { revokeAllRefreshTokens } from '../../lib/redis';
 import { param } from '../../lib/params';
+import { ADMIN_ROLES, assertBranchAccess, getUserBranchId, isSuperAdmin, resolveBranchId } from '../../lib/access';
 
 const router = Router();
 router.use(authenticate);
@@ -16,7 +17,8 @@ const createUserSchema = z.object({
   name: z.string().min(2).max(100),
   email: z.string().email().max(255),
   password: z.string().min(8).max(128),
-  role: z.enum(['admin', 'supervisor', 'agent']),
+  role: z.enum(['branch_admin', 'supervisor', 'agent']),
+  branchId: z.string().uuid().optional(),
   teamId: z.string().uuid().optional().nullable(),
 }).refine(data => !(data.role === 'agent' && !data.teamId), {
   message: "Agents must be assigned to a team to ensure supervisor oversight",
@@ -27,7 +29,7 @@ const updateUserSchema = z.object({
   name: z.string().min(2).max(100).optional(),
   email: z.string().email().max(255).optional(),
   password: z.string().min(8).max(128).optional(),
-  role: z.enum(['admin', 'supervisor', 'agent']).optional(),
+  role: z.enum(['branch_admin', 'supervisor', 'agent']).optional(),
   teamId: z.string().uuid().optional().nullable(),
   status: z.enum(['active', 'inactive']).optional(),
 }).refine(data => {
@@ -49,7 +51,9 @@ router.get('/', async (req: Request, res: Response, next: NextFunction) => {
     const where =
       callerRole === 'supervisor'
         ? { team: { supervisorId: userId } }
-        : {};
+        : !isSuperAdmin(callerRole)
+          ? { branchId: getUserBranchId(req.user!) }
+          : {};
 
     const { page = '1', limit = '50', teamId, role, status } = req.query as Record<string, string>;
     const skip = (parseInt(page) - 1) * parseInt(limit);
@@ -82,18 +86,19 @@ router.get('/', async (req: Request, res: Response, next: NextFunction) => {
 
 // ── GET /api/users/:id ────────────────────────────────────────────────
 
-router.get('/:id', requireRole('admin', 'supervisor'), async (req: Request, res: Response, next: NextFunction) => {
+router.get('/:id', requireRole(...ADMIN_ROLES, 'supervisor'), async (req: Request, res: Response, next: NextFunction) => {
   try {
     const id = param(req, 'id');
     const user = await prisma.user.findUnique({
       where: { id },
       select: {
         id: true, name: true, email: true, role: true,
-        status: true, teamId: true, createdAt: true, updatedAt: true,
+        branchId: true, status: true, teamId: true, createdAt: true, updatedAt: true,
         team: { select: { id: true, name: true } },
       },
     });
     if (!user) throw new AppError(404, 'USER_NOT_FOUND', 'User not found');
+    assertBranchAccess(req.user!, user.branchId);
     res.json({ success: true, data: user });
   } catch (err) {
     next(err);
@@ -102,16 +107,32 @@ router.get('/:id', requireRole('admin', 'supervisor'), async (req: Request, res:
 
 // ── POST /api/users ───────────────────────────────────────────────────
 
-router.post('/', requireRole('admin'), async (req: Request, res: Response, next: NextFunction) => {
+router.post('/', requireRole(...ADMIN_ROLES), async (req: Request, res: Response, next: NextFunction) => {
   try {
     const body = createUserSchema.parse(req.body);
+    const branchId = resolveBranchId(req.user!, body.branchId);
     const exists = await prisma.user.findUnique({ where: { email: body.email } });
     if (exists) throw new AppError(409, 'EMAIL_TAKEN', 'Email is already registered');
 
+    if (body.teamId) {
+      const team = await prisma.team.findUnique({ where: { id: body.teamId }, select: { branchId: true } });
+      if (!team) throw new AppError(404, 'TEAM_NOT_FOUND', 'Team not found');
+      if (team.branchId !== branchId) {
+        throw new AppError(400, 'TEAM_BRANCH_MISMATCH', 'Team belongs to a different branch');
+      }
+    }
+
     const passwordHash = await bcrypt.hash(body.password, 12);
     const user = await prisma.user.create({
-      data: { name: body.name, email: body.email, passwordHash, role: body.role, teamId: body.teamId || null },
-      select: { id: true, name: true, email: true, role: true, status: true, teamId: true, createdAt: true },
+      data: {
+        name: body.name,
+        email: body.email,
+        passwordHash,
+        role: body.role,
+        branchId,
+        teamId: body.teamId || null,
+      },
+      select: { id: true, name: true, email: true, role: true, branchId: true, status: true, teamId: true, createdAt: true },
     });
     res.status(201).json({ success: true, data: user });
   } catch (err) {
@@ -121,12 +142,13 @@ router.post('/', requireRole('admin'), async (req: Request, res: Response, next:
 
 // ── PUT /api/users/:id ────────────────────────────────────────────────
 
-router.put('/:id', requireRole('admin'), async (req: Request, res: Response, next: NextFunction) => {
+router.put('/:id', requireRole(...ADMIN_ROLES), async (req: Request, res: Response, next: NextFunction) => {
   try {
     const id = param(req, 'id');
     const body = updateUserSchema.parse(req.body);
     const existing = await prisma.user.findUnique({ where: { id } });
     if (!existing) throw new AppError(404, 'USER_NOT_FOUND', 'User not found');
+    assertBranchAccess(req.user!, existing.branchId);
 
     if (body.email && body.email !== existing.email) {
       const taken = await prisma.user.findUnique({ where: { email: body.email } });
@@ -159,7 +181,7 @@ router.put('/:id', requireRole('admin'), async (req: Request, res: Response, nex
 // Admin can reset anyone's password.
 // Supervisor can reset passwords for agents in their team.
 
-router.post('/:id/reset-password', requireRole('admin', 'supervisor'), async (req: Request, res: Response, next: NextFunction) => {
+router.post('/:id/reset-password', requireRole(...ADMIN_ROLES, 'supervisor'), async (req: Request, res: Response, next: NextFunction) => {
   try {
     const id = param(req, 'id');
     const { password } = z.object({ password: z.string().min(8).max(128) }).parse(req.body);
@@ -167,6 +189,7 @@ router.post('/:id/reset-password', requireRole('admin', 'supervisor'), async (re
 
     const targetUser = await prisma.user.findUnique({ where: { id }, include: { team: true } });
     if (!targetUser) throw new AppError(404, 'USER_NOT_FOUND', 'User not found');
+    assertBranchAccess(req.user!, targetUser.branchId);
 
     // Access Control:
     if (callerRole === 'supervisor') {
@@ -191,10 +214,14 @@ router.post('/:id/reset-password', requireRole('admin', 'supervisor'), async (re
 
 // ── DELETE /api/users/:id (soft deactivate) ───────────────────────────
 
-router.delete('/:id', requireRole('admin'), async (req: Request, res: Response, next: NextFunction) => {
+router.delete('/:id', requireRole(...ADMIN_ROLES), async (req: Request, res: Response, next: NextFunction) => {
   try {
     const id = param(req, 'id');
     if (id === req.user!.userId) throw new AppError(400, 'CANNOT_SELF_DELETE', 'Cannot deactivate your own account');
+
+    const existing = await prisma.user.findUnique({ where: { id }, select: { branchId: true } });
+    if (!existing) throw new AppError(404, 'USER_NOT_FOUND', 'User not found');
+    assertBranchAccess(req.user!, existing.branchId);
 
     await prisma.user.update({ where: { id }, data: { status: 'inactive' } });
     await revokeAllRefreshTokens(id);
@@ -206,7 +233,7 @@ router.delete('/:id', requireRole('admin'), async (req: Request, res: Response, 
 
 // ── GET /api/users/:id/stats ──────────────────────────────────────────
 
-router.get('/:id/stats', requireRole('admin', 'supervisor'), async (req: Request, res: Response, next: NextFunction) => {
+router.get('/:id/stats', requireRole(...ADMIN_ROLES, 'supervisor'), async (req: Request, res: Response, next: NextFunction) => {
   try {
     const agentId = param(req, 'id');
     const { role: callerRole, userId: callerId } = req.user!;
@@ -219,6 +246,10 @@ router.get('/:id/stats', requireRole('admin', 'supervisor'), async (req: Request
       if (targetUser.team?.supervisorId !== callerId) {
         throw new AppError(403, 'FORBIDDEN', 'You can only view stats for agents in your team');
       }
+    } else {
+      const targetUser = await prisma.user.findUnique({ where: { id: agentId }, select: { branchId: true } });
+      if (!targetUser) throw new AppError(404, 'USER_NOT_FOUND', 'User not found');
+      assertBranchAccess(req.user!, targetUser.branchId);
     }
 
     const dateFilter = from && to ? { gte: new Date(from), lte: new Date(to) } : undefined;
@@ -287,9 +318,15 @@ router.post('/me/break/end', async (req: Request, res: Response, next: NextFunct
 });
 
 // ── GET /api/users/:id/breaks ──────────────────────────────────────────
-router.get('/:id/breaks', requireRole('admin', 'supervisor'), async (req: Request, res: Response, next: NextFunction) => {
+router.get('/:id/breaks', requireRole(...ADMIN_ROLES, 'supervisor'), async (req: Request, res: Response, next: NextFunction) => {
   try {
     const agentId = param(req, 'id');
+    const targetUser = await prisma.user.findUnique({ where: { id: agentId }, select: { branchId: true, team: { select: { supervisorId: true } } } });
+    if (!targetUser) throw new AppError(404, 'USER_NOT_FOUND', 'User not found');
+    if (req.user!.role === 'supervisor' && targetUser.team?.supervisorId !== req.user!.userId) {
+      throw new AppError(403, 'FORBIDDEN', 'You can only view breaks for agents in your team');
+    }
+    assertBranchAccess(req.user!, targetUser.branchId);
     const { from, to } = req.query as Record<string, string>;
     const dateFilter = from && to ? { gte: new Date(from), lte: new Date(to) } : undefined;
 

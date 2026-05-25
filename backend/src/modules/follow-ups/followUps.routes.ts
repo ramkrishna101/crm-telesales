@@ -5,6 +5,7 @@ import { authenticate } from '../../middleware/auth';
 import { AppError } from '../../middleware/errorHandler';
 import { param } from '../../lib/params';
 import { io } from '../../index';
+import { assertBranchAccess, getUserBranchId, isSuperAdmin } from '../../lib/access';
 
 const router = Router();
 router.use(authenticate);
@@ -42,6 +43,8 @@ router.get('/', async (req: Request, res: Response, next: NextFunction) => {
       });
       const agentIds = teams.flatMap((t) => t.members.map((m) => m.id));
       where.agentId = { in: agentIds };
+    } else if (!isSuperAdmin(callerRole)) {
+      where.lead = { branchId: getUserBranchId(req.user!) };
     }
 
     if (status) where.status = status;
@@ -76,6 +79,7 @@ router.post('/', async (req: Request, res: Response, next: NextFunction) => {
 
     const lead = await prisma.lead.findUnique({ where: { id: body.leadId } });
     if (!lead) throw new AppError(404, 'LEAD_NOT_FOUND', 'Lead not found');
+    assertBranchAccess(req.user!, lead.branchId);
     if (req.user!.role === 'agent' && lead.assignedToId !== agentId) {
       throw new AppError(403, 'FORBIDDEN', 'Lead not assigned to you');
     }
@@ -113,8 +117,9 @@ router.put('/:id', async (req: Request, res: Response, next: NextFunction) => {
     const body = updateFollowUpSchema.parse(req.body);
     const { userId, role: callerRole } = req.user!;
 
-    const followUp = await prisma.followUp.findUnique({ where: { id } });
+    const followUp = await prisma.followUp.findUnique({ where: { id }, include: { lead: { select: { branchId: true } } } });
     if (!followUp) throw new AppError(404, 'FOLLOW_UP_NOT_FOUND', 'Follow-up not found');
+    assertBranchAccess(req.user!, followUp.lead.branchId);
     if (callerRole === 'agent' && followUp.agentId !== userId) {
       throw new AppError(403, 'FORBIDDEN', 'Access denied');
     }
@@ -145,8 +150,9 @@ router.put('/:id', async (req: Request, res: Response, next: NextFunction) => {
 router.delete('/:id', async (req: Request, res: Response, next: NextFunction) => {
   try {
     const id = param(req, 'id');
-    const followUp = await prisma.followUp.findUnique({ where: { id } });
+    const followUp = await prisma.followUp.findUnique({ where: { id }, include: { lead: { select: { branchId: true } } } });
     if (!followUp) throw new AppError(404, 'FOLLOW_UP_NOT_FOUND', 'Follow-up not found');
+    assertBranchAccess(req.user!, followUp.lead.branchId);
     if (req.user!.role === 'agent' && followUp.agentId !== req.user!.userId) {
       throw new AppError(403, 'FORBIDDEN', 'Access denied');
     }

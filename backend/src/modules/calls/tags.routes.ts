@@ -4,6 +4,7 @@ import { prisma } from '../../lib/prisma';
 import { authenticate, requireRole } from '../../middleware/auth';
 import { AppError } from '../../middleware/errorHandler';
 import { param } from '../../lib/params';
+import { ADMIN_ROLES } from '../../lib/access';
 
 const router = Router();
 router.use(authenticate);
@@ -33,7 +34,7 @@ router.get('/', async (_req: Request, res: Response, next: NextFunction) => {
 
 // ── POST /api/tags ────────────────────────────────────────────────────
 
-router.post('/', requireRole('admin'), async (req: Request, res: Response, next: NextFunction) => {
+router.post('/', requireRole(...ADMIN_ROLES), async (req: Request, res: Response, next: NextFunction) => {
   try {
     const body = createTagSchema.parse(req.body);
 
@@ -51,7 +52,7 @@ router.post('/', requireRole('admin'), async (req: Request, res: Response, next:
 
 // ── PUT /api/tags/:id ─────────────────────────────────────────────────
 
-router.put('/:id', requireRole('admin'), async (req: Request, res: Response, next: NextFunction) => {
+router.put('/:id', requireRole(...ADMIN_ROLES), async (req: Request, res: Response, next: NextFunction) => {
   try {
     const id = param(req, 'id');
     const body = updateTagSchema.parse(req.body);
@@ -72,7 +73,7 @@ router.put('/:id', requireRole('admin'), async (req: Request, res: Response, nex
 
 // ── DELETE /api/tags/:id ──────────────────────────────────────────────
 
-router.delete('/:id', requireRole('admin'), async (req: Request, res: Response, next: NextFunction) => {
+router.delete('/:id', requireRole(...ADMIN_ROLES), async (req: Request, res: Response, next: NextFunction) => {
   try {
     const id = param(req, 'id');
     const tag = await prisma.dispositionTag.findUnique({ where: { id } });

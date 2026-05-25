@@ -10,8 +10,20 @@ import {
 
 interface NavItem { icon: React.ReactNode; label: string; to: string; }
 
-const adminNav: NavItem[] = [
+const branchAdminNav: NavItem[] = [
   { icon: <LayoutDashboard size={18} />, label: 'Dashboard', to: '/admin' },
+  { icon: <FolderOpen size={18} />, label: 'Campaigns', to: '/admin/campaigns' },
+  { icon: <Users size={18} />, label: 'Leads', to: '/admin/leads' },
+  { icon: <UserCheck size={18} />, label: 'Users', to: '/admin/users' },
+  { icon: <Building2 size={18} />, label: 'Teams', to: '/admin/teams' },
+  { icon: <PhoneCall size={18} />, label: 'Calls', to: '/admin/calls' },
+  { icon: <Tag size={18} />, label: 'Disposition Tags', to: '/admin/tags' },
+  { icon: <BarChart3 size={18} />, label: 'Analytics', to: '/admin/analytics' },
+];
+
+const superAdminNav: NavItem[] = [
+  { icon: <LayoutDashboard size={18} />, label: 'Dashboard', to: '/admin' },
+  { icon: <Building2 size={18} />, label: 'Branches', to: '/admin/branches' },
   { icon: <FolderOpen size={18} />, label: 'Campaigns', to: '/admin/campaigns' },
   { icon: <Users size={18} />, label: 'Leads', to: '/admin/leads' },
   { icon: <UserCheck size={18} />, label: 'Users', to: '/admin/users' },
@@ -36,8 +48,18 @@ const agentNav: NavItem[] = [
   { icon: <PhoneCall size={18} />, label: 'Call History', to: '/agent/calls' },
 ];
 
-const roleNavs = { admin: adminNav, supervisor: supervisorNav, agent: agentNav };
-const roleTitles = { admin: 'Admin Panel', supervisor: 'Supervisor', agent: 'Agent Workspace' };
+const roleNavs = {
+  super_admin: superAdminNav,
+  branch_admin: branchAdminNav,
+  supervisor: supervisorNav,
+  agent: agentNav,
+};
+const roleTitles = {
+  super_admin: 'Super Admin',
+  branch_admin: 'Branch Admin',
+  supervisor: 'Supervisor',
+  agent: 'Agent Workspace',
+};
 
 export default function AppLayout({ children }: { children: React.ReactNode }) {
   const { user, logout, refreshToken, updateUser } = useAuthStore();

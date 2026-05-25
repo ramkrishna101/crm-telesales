@@ -1,7 +1,7 @@
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
 
-export const ROLES = ['admin', 'supervisor', 'agent'] as const;
+export const ROLES = ['super_admin', 'branch_admin', 'supervisor', 'agent'] as const;
 export type Role = (typeof ROLES)[number];
 
 
@@ -10,6 +10,7 @@ export interface AuthUser {
   name: string;
   email: string;
   role: Role;
+  branchId: string | null;
   teamId: string | null;
   status?: 'active' | 'inactive' | 'on_break' | 'offline';
 }

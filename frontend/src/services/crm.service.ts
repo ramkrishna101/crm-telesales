@@ -11,6 +11,14 @@ export const authService = {
     api.post('/auth/refresh', { refreshToken }),
 };
 
+// ── Branches ──────────────────────────────────────────────────────────
+export const branchesService = {
+  list: () => api.get('/branches'),
+  get: (id: string) => api.get(`/branches/${id}`),
+  create: (data: Record<string, unknown>) => api.post('/branches', data),
+  update: (id: string, data: Record<string, unknown>) => api.put(`/branches/${id}`, data),
+};
+
 // ── Users ─────────────────────────────────────────────────────────────
 export const usersService = {
   list: (params?: Record<string, string | number>) =>

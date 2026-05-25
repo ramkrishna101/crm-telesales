@@ -4,6 +4,7 @@ import { prisma } from '../../lib/prisma';
 import { authenticate, requireRole } from '../../middleware/auth';
 import { AppError } from '../../middleware/errorHandler';
 import { param } from '../../lib/params';
+import { ADMIN_ROLES, assertBranchAccess, getUserBranchId, isAdminRole, isSuperAdmin, resolveBranchId } from '../../lib/access';
 
 const router = Router();
 router.use(authenticate);
@@ -13,6 +14,7 @@ const createCampaignSchema = z.object({
   description: z.string().optional(),
   type: z.enum(['standard', 'vip']).default('standard'),
   priority: z.enum(['normal', 'high']).default('normal'),
+  branchId: z.string().uuid().optional(),
   teamId: z.string().optional().nullable(),
   agentIds: z.array(z.string()).optional(),
 });
@@ -22,6 +24,7 @@ const updateCampaignSchema = z.object({
   description: z.string().optional(),
   status: z.enum(['active', 'paused', 'closed']).optional(),
   priority: z.enum(['normal', 'high']).optional(),
+  branchId: z.string().uuid().optional(),
   teamId: z.string().optional().nullable(),
   script: z.string().optional(),
 });
@@ -45,7 +48,10 @@ router.get('/', async (req: Request, res: Response, next: NextFunction) => {
 
     if (status) where.status = status;
     if (type) where.type = type;
-    if (teamId && callerRole === 'admin') where.teamId = teamId;
+    if (!isSuperAdmin(callerRole)) {
+      where.branchId = getUserBranchId(req.user!);
+    }
+    if (teamId && isAdminRole(callerRole)) where.teamId = teamId;
 
     const [campaigns, total] = await Promise.all([
       prisma.campaign.findMany({
@@ -105,9 +111,16 @@ router.get('/:id', async (req: Request, res: Response, next: NextFunction) => {
 
 // ── POST /api/campaigns ───────────────────────────────────────────────
 
-router.post('/', requireRole('admin'), async (req: Request, res: Response, next: NextFunction) => {
+router.post('/', requireRole(...ADMIN_ROLES), async (req: Request, res: Response, next: NextFunction) => {
   try {
     const body = createCampaignSchema.parse(req.body);
+    const branchId = resolveBranchId(req.user!, body.branchId);
+
+    if (body.teamId) {
+      const team = await prisma.team.findUnique({ where: { id: body.teamId }, select: { branchId: true } });
+      if (!team) throw new AppError(404, 'TEAM_NOT_FOUND', 'Team not found');
+      assertBranchAccess(req.user!, team.branchId);
+    }
 
     const campaign = await prisma.campaign.create({
       data: {
@@ -115,6 +128,7 @@ router.post('/', requireRole('admin'), async (req: Request, res: Response, next:
         description: body.description,
         type: body.type,
         priority: body.priority,
+        branchId,
         teamId: body.teamId || null,
         createdById: req.user!.userId,
         ...(body.agentIds?.length && {
@@ -134,13 +148,14 @@ router.post('/', requireRole('admin'), async (req: Request, res: Response, next:
 
 // ── PUT /api/campaigns/:id ────────────────────────────────────────────
 
-router.put('/:id', requireRole('admin', 'supervisor'), async (req: Request, res: Response, next: NextFunction) => {
+router.put('/:id', requireRole(...ADMIN_ROLES, 'supervisor'), async (req: Request, res: Response, next: NextFunction) => {
   try {
     const id = param(req, 'id');
     const body = updateCampaignSchema.parse(req.body);
 
     const existing = await prisma.campaign.findUnique({ where: { id } });
     if (!existing) throw new AppError(404, 'CAMPAIGN_NOT_FOUND', 'Campaign not found');
+    assertBranchAccess(req.user!, existing.branchId);
 
     if (req.user!.role === 'supervisor') {
       const teamIds = await getSupervisorTeamIds(req.user!.userId);
@@ -215,13 +230,14 @@ router.put('/:id', requireRole('admin', 'supervisor'), async (req: Request, res:
 
 // ── POST /api/campaigns/:id/agents ────────────────────────────────────
 
-router.post('/:id/agents', requireRole('admin'), async (req: Request, res: Response, next: NextFunction) => {
+router.post('/:id/agents', requireRole(...ADMIN_ROLES), async (req: Request, res: Response, next: NextFunction) => {
   try {
     const id = param(req, 'id');
     const { agentIds } = z.object({ agentIds: z.array(z.string()).min(1) }).parse(req.body);
 
     const campaign = await prisma.campaign.findUnique({ where: { id } });
     if (!campaign) throw new AppError(404, 'CAMPAIGN_NOT_FOUND', 'Campaign not found');
+    assertBranchAccess(req.user!, campaign.branchId);
 
     await prisma.$transaction(
       agentIds.map((agentId) =>
@@ -240,7 +256,7 @@ router.post('/:id/agents', requireRole('admin'), async (req: Request, res: Respo
 
 // ── DELETE /api/campaigns/:id/agents ─────────────────────────────────
 
-router.delete('/:id/agents', requireRole('admin'), async (req: Request, res: Response, next: NextFunction) => {
+router.delete('/:id/agents', requireRole(...ADMIN_ROLES), async (req: Request, res: Response, next: NextFunction) => {
   try {
     const id = param(req, 'id');
     const { agentIds } = z.object({ agentIds: z.array(z.string()).min(1) }).parse(req.body);
@@ -253,7 +269,7 @@ router.delete('/:id/agents', requireRole('admin'), async (req: Request, res: Res
 
 // ── GET /api/campaigns/:id/stats ──────────────────────────────────────
 
-router.get('/:id/stats', requireRole('admin', 'supervisor'), async (req: Request, res: Response, next: NextFunction) => {
+router.get('/:id/stats', requireRole(...ADMIN_ROLES, 'supervisor'), async (req: Request, res: Response, next: NextFunction) => {
   try {
     const campaignId = param(req, 'id');
 

@@ -8,6 +8,7 @@ import { Server as SocketServer } from 'socket.io';
 import rateLimit from 'express-rate-limit';
 import { errorHandler } from './middleware/errorHandler';
 import authRoutes from './modules/auth/auth.routes';
+import branchRoutes from './modules/branch/branch.routes';
 import usersRoutes from './modules/users/users.routes';
 import teamsRoutes from './modules/teams/teams.routes';
 import campaignsRoutes from './modules/campaigns/campaigns.routes';
@@ -19,7 +20,10 @@ import agentRoutes from './modules/agent/agent.routes';
 import { startLeadUploadWorker } from './jobs/leadUpload.worker';
 import { startFollowUpReminderJob } from './jobs/followUpReminder.job';
 import { verifyAccessToken } from './lib/jwt';
+import { prisma } from './lib/prisma';
 import { redis } from './lib/redis';
+
+const DEFAULT_BRANCH_CODE = 'primary';
 
 const app = express();
 app.set('trust proxy', 1); // Required for express-rate-limit behind Railway/Render proxy
@@ -89,8 +93,6 @@ app.get('/health', async (_req, res) => {
   } catch {}
 
   try {
-    const { PrismaClient } = require('@prisma/client');
-    const prisma = new PrismaClient();
     userCount = await prisma.user.count();
   } catch {}
 
@@ -105,6 +107,7 @@ app.get('/health', async (_req, res) => {
 // ── API Routes ────────────────────────────────────────────────────────
 app.use('/api/auth', authLimiter, authRoutes);
 
+app.use('/api/branches', branchRoutes);
 app.use('/api/users', usersRoutes);
 app.use('/api/teams', teamsRoutes);
 app.use('/api/campaigns', campaignsRoutes);
@@ -145,19 +148,27 @@ httpServer.listen(PORT, async () => {
 
   // Force provision/reset admin user (to resolve login lockouts)
   try {
-    const { PrismaClient } = require('@prisma/client');
     const bcrypt = require('bcryptjs');
-    const prisma = new PrismaClient();
+    const defaultBranch = await prisma.branch.upsert({
+      where: { code: DEFAULT_BRANCH_CODE },
+      update: {},
+      create: {
+        name: 'Primary',
+        code: DEFAULT_BRANCH_CODE,
+        status: 'active',
+      },
+    });
     
     const adminPassword = await bcrypt.hash('admin@123', 12);
     await prisma.user.upsert({
       where: { email: 'admin@crm.com' },
-      update: { passwordHash: adminPassword, status: 'offline' },
+      update: { passwordHash: adminPassword, status: 'offline', role: 'super_admin', branchId: defaultBranch.id },
       create: {
         name: 'Super Admin',
         email: 'admin@crm.com',
         passwordHash: adminPassword,
-        role: 'admin',
+        role: 'super_admin',
+        branchId: defaultBranch.id,
         status: 'offline'
       }
     });
