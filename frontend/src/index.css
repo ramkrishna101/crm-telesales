@@ -64,7 +64,10 @@ input, textarea, select { font-family: inherit; }
     justify-content: center;
     position: relative;
     overflow: hidden;
-    background: var(--bg-base);
+    background:
+      radial-gradient(circle at top left, rgba(99, 91, 255, 0.12), transparent 24%),
+      radial-gradient(circle at bottom right, rgba(91, 141, 239, 0.12), transparent 22%),
+      linear-gradient(180deg, #fbfbfd 0%, #f3f4f8 100%);
   }
 
   .login-bg {
@@ -77,7 +80,7 @@ input, textarea, select { font-family: inherit; }
     position: absolute;
     border-radius: 50%;
     filter: blur(80px);
-    opacity: 0.12;
+    opacity: 0.08;
     animation: orb-drift 12s ease-in-out infinite alternate;
   }
 
@@ -137,12 +140,12 @@ input, textarea, select { font-family: inherit; }
   .login-logo {
     width: 64px;
     height: 64px;
-    background: linear-gradient(135deg, #5c83ff, #7267f6);
+    background: linear-gradient(135deg, #635bff, #6f63ff);
     border-radius: 18px;
     display: flex;
     align-items: center;
     justify-content: center;
-    box-shadow: var(--glow-accent), var(--shadow);
+    box-shadow: 0 16px 34px rgba(99, 91, 255, 0.18);
   }
 
   .login-logo-icon { font-size: 1.8rem; }
@@ -150,10 +153,7 @@ input, textarea, select { font-family: inherit; }
   .login-title {
     font-size: 1.8rem;
     font-weight: 800;
-    background: linear-gradient(135deg, #f1f5f9, #94a3b8);
-    -webkit-background-clip: text;
-    -webkit-text-fill-color: transparent;
-    background-clip: text;
+    color: var(--text-primary);
     letter-spacing: -0.5px;
   }
 
@@ -165,11 +165,11 @@ input, textarea, select { font-family: inherit; }
 
   .login-card {
     width: 100%;
-    background: rgba(17, 25, 42, 0.96);
-    border: 1px solid var(--border-subtle);
+    background: rgba(255, 255, 255, 0.96);
+    border: 1px solid #dde1ec;
     border-radius: var(--radius-xl);
     padding: 32px;
-    box-shadow: var(--shadow-lg);
+    box-shadow: 0 24px 56px rgba(24, 33, 77, 0.14);
   }
 
   .login-card-title {
@@ -227,8 +227,8 @@ input, textarea, select { font-family: inherit; }
   /* ── Login Button ────────────────────────────────────────────────────── */
   .login-btn {
     width: 100%;
-    background: linear-gradient(135deg, #34c7f4, #22b7ea);
-    color: #07111c;
+    background: linear-gradient(135deg, #685dff, #5a6cff);
+    color: #ffffff;
     border: none;
     border-radius: var(--radius);
     padding: 13px;
@@ -236,14 +236,14 @@ input, textarea, select { font-family: inherit; }
     font-weight: 700;
     letter-spacing: 0.02em;
     transition: all 0.2s;
-    box-shadow: 0 8px 18px rgba(52, 199, 244, 0.22);
+    box-shadow: 0 12px 24px rgba(99, 91, 255, 0.2);
     margin-top: 4px;
   }
 
   .login-btn:hover:not(:disabled) {
-    background: linear-gradient(135deg, #49cff7, #29bef0);
+    background: linear-gradient(135deg, #5d52fa, #4f61f5);
     transform: translateY(-1px);
-    box-shadow: 0 10px 20px rgba(52, 199, 244, 0.24);
+    box-shadow: 0 14px 28px rgba(99, 91, 255, 0.24);
   }
 
   .login-btn:active:not(:disabled) { transform: translateY(0); }
@@ -264,7 +264,7 @@ input, textarea, select { font-family: inherit; }
     width: 16px;
     height: 16px;
     border: 2px solid rgba(255, 255, 255, 0.3);
-    border-top-color: #07111c;
+    border-top-color: #ffffff;
     border-radius: 50%;
     animation: spin 0.7s linear infinite;
     display: inline-block;
