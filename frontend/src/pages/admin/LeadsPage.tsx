@@ -84,7 +84,7 @@ interface Lead {
   id: string; name: string | null; phone?: string; email: string | null;
   status: string; priority: string; isDnd: boolean;
   assignedToId: string | null; assignedTo?: { id: string; name: string } | null;
-  campaignId: string; lastCalledAt: string | null; createdAt: string;
+  campaignId: string; lastCallResult?: string | null; lastCalledAt: string | null; createdAt: string;
 }
 
 // ── Upload Panel ──────────────────────────────────────────────────────
@@ -299,11 +299,10 @@ export default function LeadsPage() {
   const [campaignFilter, setCampaignFilter] = useState('');
   const [statusFilter, setStatusFilter] = useState('');
   const [agentFilter, setAgentFilter] = useState('');
-  // Draft + applied state for callResult / followUpStatus (Apply/Reset pattern)
+  // Draft + applied state for call result / lead status (Apply/Reset pattern)
   const [draftCallResult, setDraftCallResult] = useState('');
   const [draftFollowUp, setDraftFollowUp] = useState('');
   const [callResultFilter, setCallResultFilter] = useState('');
-  const [followUpFilter, setFollowUpFilter] = useState('');
   const [search, setSearch] = useState('');
   const [page, setPage] = useState(1);
   const [showUpload, setShowUpload] = useState(false);
@@ -311,14 +310,14 @@ export default function LeadsPage() {
   const [confirmDelete, setConfirmDelete] = useState<string[] | null>(null);
   const LIMIT = 50;
 
-  const hasUnapplied = draftCallResult !== callResultFilter || draftFollowUp !== followUpFilter;
-  const hasActiveFilters = !!(callResultFilter || followUpFilter || draftCallResult || draftFollowUp);
+  const hasUnapplied = draftCallResult !== callResultFilter || draftFollowUp !== statusFilter;
+  const hasActiveFilters = !!(callResultFilter || statusFilter || draftCallResult || draftFollowUp);
 
-  const applyFilters = () => { setCallResultFilter(draftCallResult); setFollowUpFilter(draftFollowUp); setPage(1); };
-  const resetFilters = () => { setDraftCallResult(''); setDraftFollowUp(''); setCallResultFilter(''); setFollowUpFilter(''); setPage(1); };
+  const applyFilters = () => { setCallResultFilter(draftCallResult); setStatusFilter(draftFollowUp); setPage(1); };
+  const resetFilters = () => { setDraftCallResult(''); setDraftFollowUp(''); setCallResultFilter(''); setStatusFilter(''); setPage(1); };
 
   const { data: leadsData, isLoading } = useQuery({
-    queryKey: ['leads', page, campaignFilter, statusFilter, agentFilter, callResultFilter, followUpFilter],
+    queryKey: ['leads', page, campaignFilter, statusFilter, agentFilter, callResultFilter],
     queryFn: () => leadsService.list({ 
       page, 
       limit: LIMIT, 
@@ -326,7 +325,6 @@ export default function LeadsPage() {
       ...(statusFilter ? { status: statusFilter } : {}),
       ...(agentFilter ? { assignedToId: agentFilter } : {}),
       ...(callResultFilter ? { callResult: callResultFilter } : {}),
-      ...(followUpFilter ? { followUpStatus: followUpFilter } : {}),
     }),
   });
 
@@ -445,7 +443,6 @@ export default function LeadsPage() {
                   ...(statusFilter ? { status: statusFilter } : {}),
                   ...(agentFilter ? { assignedToId: agentFilter } : {}),
                   ...(callResultFilter ? { callResult: callResultFilter } : {}),
-                  ...(followUpFilter ? { followUpStatus: followUpFilter } : {}),
                 },
                 campaigns as { id: string; name: string }[],
                 agents as { id: string; name: string }[],
@@ -507,9 +504,13 @@ export default function LeadsPage() {
             placeholder="All followup statuses"
             options={[
               { value: '', label: 'All followup statuses' },
-              { value: 'pending',   label: 'Pending',   colour: '#f59e0b' },
-              { value: 'completed', label: 'Completed', colour: '#22c55e' },
-              { value: 'missed',    label: 'Missed',    colour: '#ef4444' },
+              { value: 'uncontacted',    label: 'Uncontacted',    colour: '#6f63ff' },
+              { value: 'contacted',      label: 'Contacted',      colour: '#3b82f6' },
+              { value: 'lead',           label: 'Interested',     colour: '#1f9d55' },
+              { value: 'callback',       label: 'Callback',       colour: '#c67a0a' },
+              { value: 'not_interested', label: 'Not Interested', colour: '#dc2626' },
+              { value: 'dnd',            label: 'DND',            colour: '#c2410c' },
+              { value: 'invalid',        label: 'Invalid',        colour: '#64748b' },
             ]}
           />
           <Dropdown
@@ -535,13 +536,6 @@ export default function LeadsPage() {
               style={{ height: 36, padding: '0 12px', fontSize: 13, fontWeight: 500, borderRadius: 8, border: '1px solid #cbd5e1', cursor: hasActiveFilters ? 'pointer' : 'not-allowed', background: 'var(--bg-surface)', color: hasActiveFilters ? '#475569' : '#cbd5e1' }}
             >Reset</button>
           </div>
-          <div className="filter-tabs">
-            {['', 'uncontacted', 'contacted', 'lead', 'callback', 'not_interested', 'invalid', 'dnd'].map((s) => (
-              <button key={s} className={`filter-tab ${statusFilter === s ? 'filter-tab--active' : ''}`} onClick={() => { setStatusFilter(s); setPage(1); }}>
-                {s || 'All'}
-              </button>
-            ))}
-          </div>
         </div>
 
         {/* Table */}
@@ -549,9 +543,10 @@ export default function LeadsPage() {
           <div className="table-header">
             <div style={{ width: 28 }}><input type="checkbox" onChange={(e) => setSelected(e.target.checked ? leads.map(l => l.id) : [])} /></div>
             <div className="table-col" style={{ flex: 2 }}>Contact</div>
-            <div className="table-col">Status</div>
+            <div className="table-col">Followup Status</div>
             <div className="table-col">Priority</div>
             <div className="table-col">Assigned To</div>
+            <div className="table-col">Last Call Result</div>
             <div className="table-col">Last Called</div>
             <div className="table-col">Actions</div>
           </div>
@@ -580,6 +575,23 @@ export default function LeadsPage() {
               </div>
               <div className="table-cell" style={{ color: 'var(--text-secondary)' }}>
                 {l.assignedTo?.name || <span style={{ color: 'var(--text-muted)' }}>Unassigned</span>}
+              </div>
+              <div className="table-cell">
+                {l.lastCallResult ? (
+                  <span
+                    className="badge"
+                    style={{
+                      background: '#eef2ff',
+                      color: '#4338ca',
+                      whiteSpace: 'nowrap',
+                      textTransform: 'capitalize',
+                    }}
+                  >
+                    {l.lastCallResult}
+                  </span>
+                ) : (
+                  <span style={{ color: 'var(--text-muted)', fontSize: '0.78rem' }}>—</span>
+                )}
               </div>
               <div className="table-cell" style={{ color: 'var(--text-muted)', fontSize: '0.78rem' }}>
                 {l.lastCalledAt ? new Date(l.lastCalledAt).toLocaleString() : '—'}
