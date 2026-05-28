@@ -9,6 +9,8 @@ export const authService = {
   me: () => api.get('/auth/me'),
   refresh: (refreshToken: string) =>
     api.post('/auth/refresh', { refreshToken }),
+  stringeeConfig: () => api.get('/stringee/config'),
+  stringeeToken: () => api.get('/stringee/token'),
 };
 
 // ── Branches ──────────────────────────────────────────────────────────
@@ -27,12 +29,14 @@ export const usersService = {
   create: (data: Record<string, unknown>) => api.post('/users', data),
   update: (id: string, data: Record<string, unknown>) => api.put(`/users/${id}`, data),
   deactivate: (id: string) => api.delete(`/users/${id}`),
+  delete: (id: string) => api.delete(`/users/${id}`),
   resetPassword: (id: string, password: string) =>
     api.post(`/users/${id}/reset-password`, { password }),
   stats: (id: string, params?: Record<string, string>) =>
     api.get(`/users/${id}/stats`, { params }),
   getBreaks: (id: string, params?: Record<string, string>) =>
     api.get(`/users/${id}/breaks`, { params }),
+  syncStringee: (id: string) => api.post(`/users/${id}/sync-stringee`),
 };
 
 // ── Teams ─────────────────────────────────────────────────────────────
@@ -45,6 +49,7 @@ export const teamsService = {
     api.post(`/teams/${id}/members`, { agentIds }),
   removeMembers: (id: string, agentIds: string[]) =>
     api.delete(`/teams/${id}/members`, { data: { agentIds } }),
+  delete: (id: string) => api.delete(`/teams/${id}`),
 };
 
 // ── Campaigns ─────────────────────────────────────────────────────────
@@ -55,6 +60,7 @@ export const campaignsService = {
   create: (data: Record<string, unknown>) => api.post('/campaigns', data),
   update: (id: string, data: Record<string, unknown>) =>
     api.put(`/campaigns/${id}`, data),
+  delete: (id: string) => api.delete(`/campaigns/${id}`),
   stats: (id: string) => api.get(`/campaigns/${id}/stats`),
   addAgents: (id: string, agentIds: string[]) =>
     api.post(`/campaigns/${id}/agents`, { agentIds }),
@@ -67,6 +73,7 @@ export const leadsService = {
   list: (params?: Record<string, string | number>) =>
     api.get('/leads', { params }),
   get: (id: string) => api.get(`/leads/${id}`),
+  getCallTarget: (id: string) => api.get(`/leads/${id}/call-target`),
   upload: (campaignId: string, file: File) => {
     const form = new FormData();
     form.append('file', file);
@@ -81,6 +88,8 @@ export const leadsService = {
     api.post('/leads/assign-campaign', { campaignId, agentId }),
   reclaim: (leadIds: string[]) =>
     api.post('/leads/reclaim', { leadIds }),
+  delete: (leadIds: string[]) =>
+    api.delete('/leads', { data: { leadIds } }),
   updateStatus: (id: string, status: string) =>
     api.put(`/leads/${id}/status`, { status }),
   addComment: (id: string, content: string) => api.post(`/leads/${id}/comments`, { content }),
@@ -93,6 +102,7 @@ export const callsService = {
     api.get('/calls', { params }),
   summary: (params?: Record<string, string>) =>
     api.get('/calls/summary', { params }),
+  cdr: (callId: string) => api.get(`/calls/cdr/${callId}`),
 };
 
 // ── Tags ──────────────────────────────────────────────────────────────

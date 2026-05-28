@@ -31,8 +31,8 @@ router.get('/', requireRole(...MANAGEMENT_ROLES), async (req: Request, res: Resp
   try {
     const { role: callerRole, userId } = req.user!;
     const where: Record<string, unknown> = isSuperAdmin(callerRole)
-      ? {}
-      : { branchId: getUserBranchId(req.user!) };
+      ? { deletedAt: null }
+      : { branchId: getUserBranchId(req.user!), deletedAt: null };
     if (callerRole === 'supervisor') {
       where.supervisorId = userId;
     }
@@ -57,8 +57,8 @@ router.get('/', requireRole(...MANAGEMENT_ROLES), async (req: Request, res: Resp
 router.get('/:id', requireRole(...MANAGEMENT_ROLES), async (req: Request, res: Response, next: NextFunction) => {
   try {
     const id = param(req, 'id');
-    const team = await prisma.team.findUnique({
-      where: { id },
+    const team = await prisma.team.findFirst({
+      where: { id, deletedAt: null },
       include: {
         supervisor: { select: { id: true, name: true, email: true } },
         members: { select: { id: true, name: true, email: true, role: true, status: true } },
@@ -179,11 +179,12 @@ router.delete('/:id/members', requireRole(...ADMIN_ROLES), async (req: Request, 
 router.delete('/:id', requireRole(...ADMIN_ROLES), async (req: Request, res: Response, next: NextFunction) => {
   try {
     const id = param(req, 'id');
-    const team = await prisma.team.findUnique({ where: { id } });
+    const team = await prisma.team.findFirst({ where: { id, deletedAt: null }, select: { branchId: true } });
     if (!team) throw new AppError(404, 'TEAM_NOT_FOUND', 'Team not found');
     assertBranchAccess(req.user!, team.branchId);
-    await prisma.user.updateMany({ where: { teamId: id, branchId: team.branchId }, data: { teamId: null } });
-    await prisma.team.delete({ where: { id } });
+    // Unlink members (don't orphan users) and soft-delete the team
+    await prisma.user.updateMany({ where: { teamId: id }, data: { teamId: null } });
+    await prisma.team.update({ where: { id }, data: { deletedAt: new Date() } });
     res.json({ success: true, data: { message: 'Team deleted' } });
   } catch (err) {
     next(err);

@@ -3,12 +3,14 @@ import { useState, useRef } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { campaignsService, teamsService, usersService, leadsService } from '../../services/crm.service';
 import AppLayout from '../../components/layout/AppLayout';
+import ConfirmDialog from '../../components/ui/ConfirmDialog';
 import toast from 'react-hot-toast';
+import * as XLSX from 'xlsx';
 import {
   Plus, X, BarChart2, Pause, Play, Eye, Search,
   RefreshCw, ChevronRight, ChevronLeft,
   Users2, Building2, CheckCircle2, UserPlus, UserMinus,
-  Upload, FileSpreadsheet, FileText, CheckCircle, TrendingUp, PhoneCall, Users
+  Upload, FileSpreadsheet, FileText, CheckCircle, TrendingUp, PhoneCall, Users, Download, Trash2,
 } from 'lucide-react';
 
 const formatCampaignDate = (value: string) => new Intl.DateTimeFormat('en-US', {
@@ -25,6 +27,7 @@ interface Campaign {
   team?: { id: string; name: string } | null;
   createdBy: { id: string; name: string };
   _count: { leads: number; agents: number };
+  contactedLeads?: number;
   createdAt: string;
 }
 interface Team { id: string; name: string; members?: { id: string; name: string; email: string }[]; }
@@ -445,12 +448,16 @@ export default function CampaignsPage() {
   const [showCreate, setShowCreate] = useState(false);
   const [selectedStatsId, setSelectedStatsId] = useState<string | null>(null);
   const [editTeamId, setEditTeamId] = useState<string | null>(null);
+  const [deleteCampaign, setDeleteCampaign] = useState<Campaign | null>(null);
   const [statusFilter, setStatusFilter] = useState('');
   const [searchTerm, setSearchTerm] = useState('');
 
   const { data: campaignsData, isLoading } = useQuery({
     queryKey: ['campaigns', statusFilter],
     queryFn: () => campaignsService.list({ limit: 100, ...(statusFilter ? { status: statusFilter } : {}) }),
+    // Live progress — refresh every 10s while page is visible.
+    refetchInterval: 10_000,
+    refetchIntervalInBackground: false,
   });
 
   const { data: teamsData } = useQuery({
@@ -470,12 +477,58 @@ export default function CampaignsPage() {
     onError: (e: Error) => toast.error(e.message || 'Failed'),
   });
 
+  const deleteMutation = useMutation({
+    mutationFn: (id: string) => campaignsService.delete(id),
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ['campaigns'] }); toast.success('Campaign deleted'); setDeleteCampaign(null); },
+    onError: (e: Error) => toast.error(e.message || 'Failed to delete'),
+  });
+
   const campaigns: Campaign[] = campaignsData?.data?.data?.campaigns || [];
   const teams: Team[] = teamsData?.data?.data || [];
   const agents: User[] = usersData?.data?.data?.users || [];
   const filteredCampaigns = campaigns.filter((campaign) =>
     campaign.name.toLowerCase().includes(searchTerm.trim().toLowerCase()),
   );
+
+  // ── Export leads for a single campaign as Excel ────────────────────
+  // Mirrors the admin Leads page export but pre-filtered to one campaign.
+  async function exportCampaignLeads(c: Campaign) {
+    const toastId = `export-${c.id}`;
+    toast.loading(`Preparing ${c.name} export…`, { id: toastId });
+    try {
+      const countRes = await leadsService.list({ campaignId: c.id, limit: 1, page: 1 });
+      const total: number = countRes.data?.data?.total ?? 0;
+      if (!total) {
+        toast.error('No leads in this campaign', { id: toastId });
+        return;
+      }
+      const res = await leadsService.list({ campaignId: c.id, limit: total, page: 1 });
+      const leads = res.data?.data?.leads ?? [];
+      const rows = leads.map((l: Record<string, unknown>) => ({
+        Name: l.name ?? '',
+        'Mobile Number': l.phone ?? '',
+        Email: l.email ?? '',
+        Status: l.status,
+        Priority: l.priority,
+        DND: (l.isDnd as boolean) ? 'Yes' : 'No',
+        'Last Call Result': l.lastCallResult ?? '',
+        Language: l.lastCallLanguage ?? '',
+        'Last Call Description': l.lastCallDescription ?? '',
+        'Assigned To': (l.assignedTo as { name?: string } | null)?.name || 'Unassigned',
+        'Last Called': l.lastCalledAt ? new Date(l.lastCalledAt as string).toLocaleString() : '',
+        'Created At': new Date(l.createdAt as string).toLocaleString(),
+      }));
+      const ws = XLSX.utils.json_to_sheet(rows);
+      const wb = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(wb, ws, 'Leads');
+      const safeName = c.name.replace(/[^a-z0-9_-]+/gi, '_').slice(0, 40);
+      const filename = `${safeName}_leads_${new Date().toISOString().slice(0, 10)}.xlsx`;
+      XLSX.writeFile(wb, filename);
+      toast.success(`Exported ${leads.length} leads`, { id: toastId });
+    } catch {
+      toast.error('Export failed', { id: toastId });
+    }
+  }
 
   const statusColour: Record<string, string> = { active: '#22c55e', paused: '#f59e0b', closed: '#94a3b8' };
   const priorityColour: Record<string, string> = { high: '#ef4444', normal: '#6366f1' };
@@ -524,7 +577,7 @@ export default function CampaignsPage() {
               <div className="table-col">Status</div>
               <div className="table-col">Priority</div>
               <div className="table-col">Type</div>
-              <div className="table-col">Leads</div>
+              <div className="table-col">Progress</div>
               <div className="table-col">Agents</div>
               <div className="table-col">Team</div>
               <div className="table-col">Created</div>
@@ -556,7 +609,33 @@ export default function CampaignsPage() {
                   <span className="badge campaign-list__type-badge">{c.type}</span>
                 </div>
 
-                <div className="table-cell campaign-list__metric">{c._count.leads.toLocaleString()}</div>
+                <div className="table-cell campaign-list__metric">
+                  {(() => {
+                    const total = c._count.leads;
+                    const done = Math.min(c.contactedLeads ?? 0, total);
+                    const pct = total > 0 ? Math.round((done / total) * 100) : 0;
+                    const barColour = pct >= 80 ? '#22c55e' : pct >= 40 ? '#6366f1' : '#94a3b8';
+                    return (
+                      <div style={{ minWidth: 90 }}>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12, marginBottom: 4 }}>
+                          <span style={{ fontWeight: 600, color: 'var(--text-primary)' }}>
+                            {done.toLocaleString()}/{total.toLocaleString()}
+                          </span>
+                          <span style={{ color: 'var(--text-muted)' }}>{pct}%</span>
+                        </div>
+                        <div style={{
+                          height: 5, background: '#e2e8f0',
+                          borderRadius: 4, overflow: 'hidden',
+                        }}>
+                          <div style={{
+                            width: `${pct}%`, height: '100%', background: barColour,
+                            transition: 'width 400ms ease, background 200ms',
+                          }} />
+                        </div>
+                      </div>
+                    );
+                  })()}
+                </div>
                 <div className="table-cell campaign-list__metric" style={{ color: c._count.agents > 0 ? '#1f9d55' : 'var(--text-muted)' }}>{c._count.agents}</div>
                 <div className="table-cell">{c.team?.name || 'Unassigned'}</div>
                 <div className="table-cell">{formatCampaignDate(c.createdAt)}</div>
@@ -569,6 +648,15 @@ export default function CampaignsPage() {
                       ? <button className="btn-icon" title="Resume" onClick={() => updateMutation.mutate({ id: c.id, data: { status: 'active' } })}><Play size={15} /></button>
                       : null}
                   <button className="btn-icon" title="Change Team" onClick={() => setEditTeamId(c.id)}><Users size={15} /></button>
+                  <button className="btn-icon" title="Export leads" onClick={() => exportCampaignLeads(c)}><Download size={15} /></button>
+                  <button
+                    className="btn-icon"
+                    title="Delete campaign"
+                    style={{ color: '#ef4444' }}
+                    onClick={() => setDeleteCampaign(c)}
+                  >
+                    <Trash2 size={15} />
+                  </button>
                 </div>
               </div>
             ))}
@@ -630,6 +718,22 @@ export default function CampaignsPage() {
           </div>
         </div>
       )}
+
+      <ConfirmDialog
+        open={!!deleteCampaign}
+        title="Delete campaign?"
+        message={
+          <>
+            Are you sure you want to delete <strong>{deleteCampaign?.name}</strong>?
+            {'\n\n'}This hides it from all listings. Lead history and call logs are preserved.
+          </>
+        }
+        confirmLabel="Delete campaign"
+        variant="danger"
+        loading={deleteMutation.isPending}
+        onConfirm={() => deleteCampaign && deleteMutation.mutate(deleteCampaign.id)}
+        onCancel={() => setDeleteCampaign(null)}
+      />
     </AppLayout>
   );
 }

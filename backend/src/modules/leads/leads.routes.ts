@@ -95,16 +95,16 @@ router.get('/', async (req: Request, res: Response, next: NextFunction) => {
   try {
     const { role: callerRole, userId } = req.user!;
     const {
-      page = '1', limit = '50', campaignId, status, priority, assignedToId,
+      page = '1', limit = '50', campaignId, status, priority, assignedToId, q, callResult, followUpStatus, from, to,
     } = req.query as Record<string, string>;
     const skip = (parseInt(page) - 1) * parseInt(limit);
 
-    let where: Record<string, unknown> = {};
+    let where: Record<string, unknown> = { deletedAt: null };
 
     if (callerRole === 'agent') {
       where.assignedToId = userId;
     } else if (callerRole === 'supervisor') {
-      where = { campaign: { team: { supervisorId: userId } } };
+      where = { deletedAt: null, campaign: { team: { supervisorId: userId } } };
     } else if (!isSuperAdmin(callerRole)) {
       where.branchId = getUserBranchId(req.user!);
     }
@@ -114,6 +114,44 @@ router.get('/', async (req: Request, res: Response, next: NextFunction) => {
     if (priority) where.priority = priority;
     if (assignedToId && callerRole !== 'agent') {
       where.assignedToId = assignedToId === 'null' ? null : assignedToId;
+    }
+
+    // Date range filter on createdAt (IST). Used by the admin dashboard.
+    if (from || to) {
+      const range: Record<string, Date> = {};
+      if (from) range.gte = new Date(`${from}T00:00:00+05:30`);
+      if (to) range.lte = new Date(`${to}T23:59:59.999+05:30`);
+      where.createdAt = range;
+    }
+
+    if (q && q.trim()) {
+      const term = q.trim();
+      where.OR = [
+        { name: { contains: term, mode: 'insensitive' } },
+        { phone: { contains: term } },
+        { email: { contains: term, mode: 'insensitive' } },
+      ];
+    }
+
+    // Filter by latest call result (disposition of the most recent CallLog per lead).
+    // Uses DISTINCT ON to get the latest disposition per lead, then narrows the
+    // leads query to those whose latest disposition matches.
+    if (callResult) {
+      const rows = await prisma.$queryRaw<{ leadId: string; dispositionTag: string }[]>`
+        SELECT DISTINCT ON ("leadId") "leadId", "dispositionTag"
+        FROM "call_logs"
+        ORDER BY "leadId", "calledAt" DESC
+      `;
+      const matchingIds = rows
+        .filter((r) => r.dispositionTag === callResult)
+        .map((r) => r.leadId);
+      // Combine with any existing id filter; empty list → no rows.
+      where.id = matchingIds.length ? { in: matchingIds } : { in: ['__none__'] };
+    }
+
+    // Filter by follow-up status (has at least one follow-up with that status).
+    if (followUpStatus) {
+      where.followUps = { some: { status: followUpStatus } };
     }
 
     const [leads, total] = await Promise.all([
@@ -137,20 +175,94 @@ router.get('/', async (req: Request, res: Response, next: NextFunction) => {
           assignedToId: true,
           createdAt: true,
           assignedTo: { select: { id: true, name: true } },
+          callLogs: {
+            take: 1,
+            orderBy: { calledAt: 'desc' },
+            select: { dispositionTag: true, calledAt: true, notes: true },
+          },
         },
       }),
       prisma.lead.count({ where }),
     ]);
 
     // Apply phone masking for agents
-    const formattedLeads = leads.map((l) => ({
-      ...l,
-      phone: callerRole === 'agent'
-        ? `****${(l as { phone?: string }).phone?.slice(-4) || '****'}`
-        : (l as { phone?: string }).phone,
-    }));
+    const formattedLeads = leads.map((l) => {
+      const { callLogs, ...rest } = l as typeof l & { callLogs?: Array<{ dispositionTag: string; calledAt: Date; notes: string | null }> };
+      const lastCallNotes = callLogs?.[0]?.notes || null;
+      // Notes are stored as "Language: <lang> | <description>". Extract both parts.
+      let lastCallLanguage: string | null = null;
+      let lastCallDescription: string | null = null;
+      if (lastCallNotes) {
+        const m = lastCallNotes.match(/^Language:\s*([^|]+?)(?:\s*\|\s*(.*))?$/i);
+        if (m) {
+          lastCallLanguage = m[1].trim();
+          lastCallDescription = (m[2] || '').trim() || null;
+        } else {
+          lastCallDescription = lastCallNotes;
+        }
+      }
+      return {
+        ...rest,
+        phone: callerRole === 'agent'
+          ? `****${(l as { phone?: string }).phone?.slice(-4) || '****'}`
+          : (l as { phone?: string }).phone,
+        lastCallResult: callLogs?.[0]?.dispositionTag || null,
+        lastCallLanguage,
+        lastCallDescription,
+      };
+    });
 
     res.json({ success: true, data: { leads: formattedLeads, total, page: parseInt(page), limit: parseInt(limit) } });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// ── GET /api/leads/:id/call-target ───────────────────────────────────
+
+router.get('/:id/call-target', async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const id = param(req, 'id');
+    const { role: callerRole, userId } = req.user!;
+
+    if (!['super_admin', 'branch_admin', 'agent'].includes(callerRole)) {
+      throw new AppError(403, 'FORBIDDEN', 'You cannot initiate calls from this role');
+    }
+
+    const lead = await prisma.lead.findFirst({
+      where: { id, deletedAt: null },
+      select: {
+        id: true,
+        name: true,
+        phone: true,
+        isDnd: true,
+        assignedToId: true,
+        branchId: true,
+      },
+    });
+
+    if (!lead) throw new AppError(404, 'LEAD_NOT_FOUND', 'Lead not found');
+
+    if (callerRole === 'agent' && lead.assignedToId !== userId) {
+      throw new AppError(403, 'FORBIDDEN', 'This lead is not assigned to you');
+    }
+
+    if (callerRole !== 'super_admin') {
+      assertBranchAccess(req.user!, lead.branchId);
+    }
+
+    if (lead.isDnd) {
+      throw new AppError(400, 'DND_BLOCKED', 'This number is on the DND list');
+    }
+
+    res.json({
+      success: true,
+      data: {
+        id: lead.id,
+        name: lead.name,
+        phone: lead.phone,
+      },
+    });
   } catch (err) {
     next(err);
   }
@@ -163,8 +275,8 @@ router.get('/:id', async (req: Request, res: Response, next: NextFunction) => {
     const id = param(req, 'id');
     const { role: callerRole, userId } = req.user!;
 
-    const lead = await prisma.lead.findUnique({
-      where: { id },
+    const lead = await prisma.lead.findFirst({
+      where: { id, deletedAt: null },
       include: {
         campaign: { select: { id: true, name: true, type: true } },
         assignedTo: { select: { id: true, name: true } },
@@ -286,7 +398,7 @@ router.put('/:id/status', async (req: Request, res: Response, next: NextFunction
       status: z.enum(['uncontacted', 'contacted', 'lead', 'not_interested', 'dnd', 'invalid', 'callback']),
     }).parse(req.body);
 
-    const lead = await prisma.lead.findUnique({ where: { id } });
+    const lead = await prisma.lead.findFirst({ where: { id, deletedAt: null } });
     if (!lead) throw new AppError(404, 'LEAD_NOT_FOUND', 'Lead not found');
 
     if (req.user!.role === 'agent' && lead.assignedToId !== req.user!.userId) {
@@ -319,7 +431,7 @@ router.post('/:id/comments', async (req: Request, res: Response, next: NextFunct
     const { content } = z.object({ content: z.string().min(1).max(2000) }).parse(req.body);
     const agentId = req.user!.userId;
 
-    const lead = await prisma.lead.findUnique({ where: { id } });
+    const lead = await prisma.lead.findFirst({ where: { id, deletedAt: null } });
     if (!lead) throw new AppError(404, 'LEAD_NOT_FOUND', 'Lead not found');
 
     if (req.user!.role === 'agent' && lead.assignedToId !== agentId) {
@@ -332,6 +444,51 @@ router.post('/:id/comments', async (req: Request, res: Response, next: NextFunct
     });
 
     res.status(201).json({ success: true, data: comment });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// ── DELETE /api/leads ──────────────────────────────────────────────────
+// Bulk soft-delete leads (admin only). Body: { leadIds: string[] }
+
+router.delete('/', requireRole(...ADMIN_ROLES), async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const { leadIds } = z.object({ leadIds: z.array(z.string().uuid()).min(1).max(1000) }).parse(req.body);
+
+    // Verify all leads belong to caller's branch (super_admin skips)
+    if (!isSuperAdmin(req.user!.role)) {
+      const branchId = getUserBranchId(req.user!);
+      const alien = await prisma.lead.findFirst({
+        where: { id: { in: leadIds }, branchId: { not: branchId }, deletedAt: null },
+        select: { id: true },
+      });
+      if (alien) throw new AppError(403, 'FORBIDDEN', 'One or more leads do not belong to your branch');
+    }
+
+    const result = await prisma.lead.updateMany({
+      where: { id: { in: leadIds }, deletedAt: null },
+      data: { deletedAt: new Date() },
+    });
+
+    res.json({ success: true, data: { deleted: result.count, message: `${result.count} lead(s) deleted` } });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// ── DELETE /api/leads/:id ──────────────────────────────────────────────
+// Soft-delete a single lead (admin only)
+
+router.delete('/:id', requireRole(...ADMIN_ROLES), async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const id = param(req, 'id');
+    const lead = await prisma.lead.findFirst({ where: { id, deletedAt: null }, select: { branchId: true } });
+    if (!lead) throw new AppError(404, 'LEAD_NOT_FOUND', 'Lead not found');
+    if (!isSuperAdmin(req.user!.role)) assertBranchAccess(req.user!, lead.branchId);
+
+    await prisma.lead.update({ where: { id }, data: { deletedAt: new Date() } });
+    res.json({ success: true, data: { message: 'Lead deleted' } });
   } catch (err) {
     next(err);
   }

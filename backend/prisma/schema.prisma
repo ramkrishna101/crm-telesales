@@ -86,17 +86,19 @@ model Branch {
 }
 
 model Team {
-  id           String   @id @default(uuid())
+  id           String    @id @default(uuid())
   name         String
-  branch       Branch   @relation(fields: [branchId], references: [id])
+  branch       Branch    @relation(fields: [branchId], references: [id])
   branchId     String
-  supervisor   User?    @relation("TeamSupervisor", fields: [supervisorId], references: [id])
+  supervisor   User?     @relation("TeamSupervisor", fields: [supervisorId], references: [id])
   supervisorId String?
-  createdAt    DateTime @default(now())
+  createdAt    DateTime  @default(now())
+  deletedAt    DateTime?
 
   members    User[]       @relation("TeamMembers")
   campaigns  Campaign[]
 
+  @@index([deletedAt])
   @@map("teams")
 }
 
@@ -104,6 +106,9 @@ model User {
   id             String     @id @default(uuid())
   name           String
   email          String     @unique
+  stringeeEmail  String?    @unique
+  stringeeAccountId String? @unique
+  stringeePasswordEnc String?
   passwordHash   String
   role           Role
   branch         Branch?    @relation(fields: [branchId], references: [id])
@@ -114,6 +119,7 @@ model User {
   breakStartedAt DateTime?
   createdAt      DateTime   @default(now())
   updatedAt      DateTime   @updatedAt
+  deletedAt      DateTime?
 
   // Supervisor back-ref
   supervisorOfTeam Team[] @relation("TeamSupervisor")
@@ -148,6 +154,7 @@ model Campaign {
   teamId      String?
   createdAt   DateTime       @default(now())
   closedAt    DateTime?
+  deletedAt   DateTime?
 
   // Relations
   agents      CampaignAgent[]
@@ -186,6 +193,7 @@ model Lead {
   isDnd        Boolean    @default(false)
   createdAt    DateTime   @default(now())
   lastCalledAt DateTime?
+  deletedAt    DateTime?
 
   // Relations
   callLogs  CallLog[]
@@ -197,6 +205,7 @@ model Lead {
   @@index([branchId])
   @@index([campaignId, status])
   @@index([campaignId, assignedToId])
+  @@index([deletedAt])
   @@map("leads")
 }
 

@@ -1,18 +1,20 @@
-  const roleColour: Record<string, string> = { admin: '#7c6cff', supervisor: '#22d3ee', agent: '#22c55e' };
 import { useEffect, useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { usersService, teamsService } from '../../services/crm.service';
 import AppLayout from '../../components/layout/AppLayout';
+import ConfirmDialog from '../../components/ui/ConfirmDialog';
 import toast from 'react-hot-toast';
-import { Plus, RefreshCw, Search, UserX, UserCheck, Edit2, X, Key, Clock } from 'lucide-react';
+import { Plus, RefreshCw, Search, UserX, UserCheck, Edit2, X, Key, Clock, Trash2 } from 'lucide-react';
 
 const USERS_PAGE_SIZE = 10;
 
-type UserRole = 'admin' | 'supervisor' | 'agent';
+type UserRole = 'super_admin' | 'branch_admin' | 'supervisor' | 'agent';
 type UserStatus = 'active' | 'inactive' | 'on_break' | 'offline';
 
 interface User {
   id: string; name: string; email: string;
+  stringeeEmail?: string | null;
+  stringeeAccountId?: string | null;
   role: UserRole; status: UserStatus; teamId: string | null;
   team?: { id: string; name: string } | null; createdAt: string;
 }
@@ -24,16 +26,37 @@ function UserModal({
   user, teams, onClose, onSave,
 }: { user?: User | null; teams: Team[]; onClose: () => void; onSave: (data: Record<string, unknown>) => void; }) {
   const isEdit = !!user;
+  const qc = useQueryClient();
   const [form, setForm] = useState({
     name: user?.name || '',
     email: user?.email || '',
+    stringeeEmail: user?.stringeeEmail || '',
     password: '',
     role: user?.role || 'agent' as UserRole,
     teamId: user?.teamId || '',
     status: user?.status || 'offline' as UserStatus,
+    stringeeAccountId: user?.stringeeAccountId || '',
   });
 
   const set = (k: string, v: string) => setForm((f) => ({ ...f, [k]: v }));
+
+  const syncMutation = useMutation({
+    mutationFn: () => usersService.syncStringee(user!.id),
+    onSuccess: (res) => {
+      const acc = res.data?.data?.stringeeAccountId as string | null | undefined;
+      if (acc) {
+        setForm((f) => ({ ...f, stringeeAccountId: acc }));
+        toast.success(`Linked to Stringee agent ${acc}`);
+      } else {
+        toast.error('Stringee did not return an account ID for that email');
+      }
+      qc.invalidateQueries({ queryKey: ['users'] });
+    },
+    onError: (err: any) => {
+      const msg = err?.response?.data?.error?.message || err?.message || 'Sync failed';
+      toast.error(msg);
+    },
+  });
 
   return (
     <div className="modal-overlay" onClick={onClose}>
@@ -49,8 +72,9 @@ function UserModal({
             return;
           }
           onSave({
-            name: form.name, email: form.email, role: form.role,
+            name: form.name, email: form.email, stringeeEmail: form.stringeeEmail || null, role: form.role,
             teamId: form.teamId || null, status: form.status,
+            stringeeAccountId: form.stringeeAccountId.trim() || null,
             ...(form.password ? { password: form.password } : {}),
           });
         }}>
@@ -67,6 +91,46 @@ function UserModal({
               <label className="form-label">Email</label>
               <input className="form-input" type="email" value={form.email} onChange={(e) => set('email', e.target.value)} placeholder="john@company.com" />
             </div>
+            <div className="form-group">
+              <label className="form-label">Stringee Email</label>
+              <input className="form-input" type="email" value={form.stringeeEmail} onChange={(e) => set('stringeeEmail', e.target.value)} placeholder="agent-stringee@company.com" />
+            </div>
+            <div className="form-group">
+              <label className="form-label">Stringee Account ID</label>
+              <div style={{ display: 'flex', gap: 8 }}>
+                <input
+                  className="form-input"
+                  value={form.stringeeAccountId}
+                  onChange={(e) => set('stringeeAccountId', e.target.value)}
+                  placeholder={isEdit ? 'Click Re-sync to fetch from StringeeX' : 'Auto-linked after save'}
+                  style={{ flex: 1 }}
+                />
+                {isEdit && form.stringeeAccountId && (
+                  <button
+                    type="button"
+                    className="btn btn-secondary"
+                    onClick={() => set('stringeeAccountId', '')}
+                    title="Clear Stringee Account ID"
+                  >
+                    Clear
+                  </button>
+                )}
+                {isEdit && (
+                  <button
+                    type="button"
+                    className="btn btn-secondary"
+                    disabled={!form.stringeeEmail || syncMutation.isPending}
+                    onClick={() => syncMutation.mutate()}
+                    title="Re-fetch this user's account_id from StringeeX"
+                  >
+                    {syncMutation.isPending ? 'Syncing…' : 'Re-sync'}
+                  </button>
+                )}
+              </div>
+              <div style={{ fontSize: 11, color: '#666', marginTop: 4 }}>
+                Auto-resolved from <strong>Stringee Email</strong> on save. No password needed.
+              </div>
+            </div>
             {!isEdit && (
               <div className="form-group">
                 <label className="form-label">Password</label>
@@ -77,7 +141,7 @@ function UserModal({
               <div className="form-group">
                 <label className="form-label">Role</label>
                 <select className="form-input" value={form.role} onChange={(e) => set('role', e.target.value)}>
-                  <option value="admin">Admin</option>
+                  <option value="branch_admin">Admin</option>
                   <option value="supervisor">Supervisor</option>
                   <option value="agent">Agent</option>
                 </select>
@@ -228,6 +292,7 @@ export default function UsersPage() {
   const [editUser, setEditUser] = useState<User | null>(null);
   const [resetUser, setResetUser] = useState<User | null>(null);
   const [breakUser, setBreakUser] = useState<User | null>(null);
+  const [deleteUser, setDeleteUser] = useState<User | null>(null);
   const [showCreate, setShowCreate] = useState(false);
 
   const { data: usersData, isLoading } = useQuery({
@@ -240,22 +305,36 @@ export default function UsersPage() {
     queryFn: () => teamsService.list(),
   });
 
+  const apiErr = (e: any, fallback: string): string => {
+    const err = e?.response?.data?.error;
+    if (err?.details?.length) {
+      return err.details.map((d: any) => `${d.path}: ${d.message}`).join(' | ');
+    }
+    return err?.message || e?.message || fallback;
+  };
+
   const createMutation = useMutation({
     mutationFn: (data: Record<string, unknown>) => usersService.create(data),
     onSuccess: () => { qc.invalidateQueries({ queryKey: ['users'] }); toast.success('User created'); setShowCreate(false); },
-    onError: (e: Error) => toast.error(e.message || 'Failed to create user'),
+    onError: (e: any) => toast.error(apiErr(e, 'Failed to create user')),
   });
 
   const updateMutation = useMutation({
     mutationFn: ({ id, data }: { id: string; data: Record<string, unknown> }) => usersService.update(id, data),
     onSuccess: () => { qc.invalidateQueries({ queryKey: ['users'] }); toast.success('User updated'); setEditUser(null); },
-    onError: (e: Error) => toast.error(e.message || 'Failed to update user'),
+    onError: (e: any) => toast.error(apiErr(e, 'Failed to update user')),
   });
 
   const deactivateMutation = useMutation({
-    mutationFn: (id: string) => usersService.deactivate(id),
+    mutationFn: (id: string) => usersService.update(id, { status: 'inactive' }),
     onSuccess: () => { qc.invalidateQueries({ queryKey: ['users'] }); toast.success('User deactivated'); },
-    onError: (e: Error) => toast.error(e.message || 'Failed'),
+    onError: (e: any) => toast.error(apiErr(e, 'Failed')),
+  });
+
+  const deleteMutation = useMutation({
+    mutationFn: (id: string) => usersService.delete(id),
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ['users'] }); toast.success('User deleted'); setDeleteUser(null); },
+    onError: (e: any) => toast.error(apiErr(e, 'Failed to delete user')),
   });
 
   const resetPasswordMutation = useMutation({
@@ -265,7 +344,7 @@ export default function UsersPage() {
       toast.success(res.data.data.message || 'Password reset successful');
       setResetUser(null);
     },
-    onError: (e: Error) => toast.error(e.message || 'Failed to reset password'),
+    onError: (e: any) => toast.error(apiErr(e, 'Failed to reset password')),
   });
 
   const users: User[] = usersData?.data?.data?.users || [];
@@ -285,7 +364,13 @@ export default function UsersPage() {
     if (page > totalPages) setPage(totalPages);
   }, [page, totalPages]);
 
-  const roleColour: Record<string, string> = { admin: '#6366f1', supervisor: '#22d3ee', agent: '#22c55e' };
+  const roleColour: Record<string, string> = { super_admin: '#4f46e5', branch_admin: '#6366f1', supervisor: '#22d3ee', agent: '#22c55e' };
+  const roleLabel: Record<UserRole, string> = {
+    super_admin: 'Super Admin',
+    branch_admin: 'Admin',
+    supervisor: 'Supervisor',
+    agent: 'Agent',
+  };
   const statusTone: Record<UserStatus, { background: string; color: string; label: string }> = {
     active: { background: '#e9f8ef', color: '#1f9d55', label: 'Active' },
     inactive: { background: '#f3f4f8', color: '#6b7280', label: 'Inactive' },
@@ -313,9 +398,9 @@ export default function UsersPage() {
             <input className="search-input" placeholder="Search users…" value={search} onChange={(e) => setSearch(e.target.value)} />
           </div>
           <div className="filter-tabs">
-            {['', 'admin', 'supervisor', 'agent'].map((r) => (
+            {['', 'branch_admin', 'supervisor', 'agent'].map((r) => (
               <button key={r} className={`filter-tab ${roleFilter === r ? 'filter-tab--active' : ''}`} onClick={() => setRoleFilter(r)}>
-                {r || 'All'}
+                {r === 'branch_admin' ? 'Admin' : r || 'All'}
               </button>
             ))}
           </div>
@@ -339,10 +424,12 @@ export default function UsersPage() {
                 <div>
                   <div style={{ fontWeight: 600, color: 'var(--text-primary)' }}>{u.name}</div>
                   <div style={{ fontSize: '0.76rem', color: 'var(--text-muted)' }}>{u.email}</div>
+                  {u.stringeeEmail && <div style={{ fontSize: '0.74rem', color: 'var(--text-secondary)' }}>Stringee: {u.stringeeEmail}</div>}
+                  {u.stringeeAccountId && <div style={{ fontSize: '0.74rem', color: 'var(--text-secondary)' }}>Account ID: {u.stringeeAccountId}</div>}
                 </div>
               </div>
               <div className="table-cell">
-                <span className="badge" style={{ background: roleColour[u.role] + '22', color: roleColour[u.role] }}>{u.role}</span>
+                <span className="badge" style={{ background: roleColour[u.role] + '22', color: roleColour[u.role] }}>{roleLabel[u.role]}</span>
               </div>
               <div className="table-cell" style={{ color: 'var(--text-secondary)' }}>{u.team?.name || '—'}</div>
               <div className="table-cell">
@@ -363,6 +450,14 @@ export default function UsersPage() {
                   ? <button className="btn-icon" title="Deactivate" onClick={() => deactivateMutation.mutate(u.id)}><UserX size={15} /></button>
                   : <button className="btn-icon" title="Reactivate" onClick={() => updateMutation.mutate({ id: u.id, data: { status: 'active' } })}><UserCheck size={15} /></button>
                 }
+                <button
+                  className="btn-icon"
+                  title="Delete user"
+                  style={{ color: '#ef4444' }}
+                  onClick={() => setDeleteUser(u)}
+                >
+                  <Trash2 size={15} />
+                </button>
               </div>
             </div>
           ))}
@@ -420,6 +515,22 @@ export default function UsersPage() {
           onClose={() => setBreakUser(null)}
         />
       )}
+
+      <ConfirmDialog
+        open={!!deleteUser}
+        title="Delete user?"
+        message={
+          <>
+            Are you sure you want to delete <strong>{deleteUser?.name}</strong>?
+            {'\n\n'}This hides them from all listings. Their leads and call history are preserved, and the email can be reused for a new account.
+          </>
+        }
+        confirmLabel="Delete user"
+        variant="danger"
+        loading={deleteMutation.isPending}
+        onConfirm={() => deleteUser && deleteMutation.mutate(deleteUser.id)}
+        onCancel={() => setDeleteUser(null)}
+      />
     </AppLayout>
   );
 }

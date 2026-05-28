@@ -53,6 +53,9 @@ router.get('/', async (req: Request, res: Response, next: NextFunction) => {
     }
     if (teamId && isAdminRole(callerRole)) where.teamId = teamId;
 
+    // Hide soft-deleted campaigns
+    where.deletedAt = null;
+
     const [campaigns, total] = await Promise.all([
       prisma.campaign.findMany({
         where,
@@ -68,7 +71,25 @@ router.get('/', async (req: Request, res: Response, next: NextFunction) => {
       prisma.campaign.count({ where }),
     ]);
 
-    res.json({ success: true, data: { campaigns, total, page: parseInt(page), limit: parseInt(limit) } });
+    // Per-campaign contacted-lead count for live progress bars.
+    // A lead is "contacted" once its status is anything other than 'uncontacted'.
+    const campaignIds = campaigns.map((c) => c.id);
+    const contactedGroups = campaignIds.length
+      ? await prisma.lead.groupBy({
+          by: ['campaignId'],
+          where: { campaignId: { in: campaignIds }, status: { not: 'uncontacted' } },
+          _count: { _all: true },
+        })
+      : [];
+    const contactedMap = new Map(
+      contactedGroups.map((g) => [g.campaignId, g._count._all]),
+    );
+    const enriched = campaigns.map((c) => ({
+      ...c,
+      contactedLeads: contactedMap.get(c.id) ?? 0,
+    }));
+
+    res.json({ success: true, data: { campaigns: enriched, total, page: parseInt(page), limit: parseInt(limit) } });
   } catch (err) {
     next(err);
   }
@@ -345,5 +366,30 @@ async function getSupervisorTeamIds(supervisorId: string): Promise<string[]> {
   const teams = await prisma.team.findMany({ where: { supervisorId }, select: { id: true } });
   return teams.map((t) => t.id);
 }
+
+// ── DELETE /api/campaigns/:id ────────────────────────────────────────
+// Soft delete: marks deletedAt so the campaign disappears from lists,
+// but related leads/calls remain intact for historical reporting.
+
+router.delete('/:id', requireRole(...ADMIN_ROLES), async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const id = param(req, 'id');
+    const existing = await prisma.campaign.findFirst({
+      where: { id, deletedAt: null },
+      select: { branchId: true },
+    });
+    if (!existing) throw new AppError(404, 'CAMPAIGN_NOT_FOUND', 'Campaign not found');
+    assertBranchAccess(req.user!, existing.branchId);
+
+    const now = new Date();
+    await prisma.campaign.update({
+      where: { id },
+      data: { deletedAt: now, status: 'closed' },
+    });
+    res.json({ success: true, data: { message: 'Campaign deleted' } });
+  } catch (err) {
+    next(err);
+  }
+});
 
 export default router;

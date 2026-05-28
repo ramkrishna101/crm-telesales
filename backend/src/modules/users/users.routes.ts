@@ -4,6 +4,7 @@ import bcrypt from 'bcryptjs';
 import { prisma } from '../../lib/prisma';
 import { authenticate, requireRole } from '../../middleware/auth';
 import { AppError } from '../../middleware/errorHandler';
+import { isStringeeXAdminConfigured, resolveStringeeAccountIdByEmail } from '../../lib/stringeexAdmin';
 import { revokeAllRefreshTokens } from '../../lib/redis';
 import { param } from '../../lib/params';
 import { ADMIN_ROLES, assertBranchAccess, getUserBranchId, isSuperAdmin, resolveBranchId } from '../../lib/access';
@@ -16,10 +17,12 @@ router.use(authenticate);
 const createUserSchema = z.object({
   name: z.string().min(2).max(100),
   email: z.string().email().max(255),
+  stringeeEmail: z.string().email().max(255).optional().nullable(),
+  stringeeAccountId: z.string().min(1).max(64).optional().nullable(),
   password: z.string().min(8).max(128),
   role: z.enum(['branch_admin', 'supervisor', 'agent']),
   branchId: z.string().uuid().optional(),
-  teamId: z.string().uuid().optional().nullable(),
+  teamId: z.string().min(1).max(64).optional().nullable(),
 }).refine(data => !(data.role === 'agent' && !data.teamId), {
   message: "Agents must be assigned to a team to ensure supervisor oversight",
   path: ["teamId"],
@@ -28,9 +31,11 @@ const createUserSchema = z.object({
 const updateUserSchema = z.object({
   name: z.string().min(2).max(100).optional(),
   email: z.string().email().max(255).optional(),
+  stringeeEmail: z.string().email().max(255).optional().nullable(),
+  stringeeAccountId: z.string().min(1).max(64).optional().nullable(),
   password: z.string().min(8).max(128).optional(),
   role: z.enum(['branch_admin', 'supervisor', 'agent']).optional(),
-  teamId: z.string().uuid().optional().nullable(),
+  teamId: z.string().min(1).max(64).optional().nullable(),
   status: z.enum(['active', 'inactive']).optional(),
 }).refine(data => {
   if (data.role === 'agent' && data.teamId === null) return false;
@@ -58,7 +63,7 @@ router.get('/', async (req: Request, res: Response, next: NextFunction) => {
     const { page = '1', limit = '50', teamId, role, status } = req.query as Record<string, string>;
     const skip = (parseInt(page) - 1) * parseInt(limit);
 
-    const filter: Record<string, unknown> = { ...where };
+    const filter: Record<string, unknown> = { ...where, deletedAt: null };
     if (teamId) filter.teamId = teamId;
     if (role) filter.role = role;
     if (status) filter.status = status;
@@ -71,6 +76,7 @@ router.get('/', async (req: Request, res: Response, next: NextFunction) => {
         orderBy: { createdAt: 'desc' },
         select: {
           id: true, name: true, email: true, role: true,
+          stringeeEmail: true, stringeeAccountId: true,
           status: true, teamId: true, createdAt: true,
           team: { select: { id: true, name: true } },
         },
@@ -93,6 +99,7 @@ router.get('/:id', requireRole(...ADMIN_ROLES, 'supervisor'), async (req: Reques
       where: { id },
       select: {
         id: true, name: true, email: true, role: true,
+        stringeeEmail: true, stringeeAccountId: true,
         branchId: true, status: true, teamId: true, createdAt: true, updatedAt: true,
         team: { select: { id: true, name: true } },
       },
@@ -113,6 +120,10 @@ router.post('/', requireRole(...ADMIN_ROLES), async (req: Request, res: Response
     const branchId = resolveBranchId(req.user!, body.branchId);
     const exists = await prisma.user.findUnique({ where: { email: body.email } });
     if (exists) throw new AppError(409, 'EMAIL_TAKEN', 'Email is already registered');
+    if (body.stringeeEmail) {
+      const stringeeEmailTaken = await prisma.user.findFirst({ where: { stringeeEmail: body.stringeeEmail, deletedAt: null }, select: { name: true } });
+      if (stringeeEmailTaken) throw new AppError(409, 'STRINGEE_EMAIL_TAKEN', `Stringee email is already linked to ${stringeeEmailTaken.name} — clear it from them first`);
+    }
 
     if (body.teamId) {
       const team = await prisma.team.findUnique({ where: { id: body.teamId }, select: { branchId: true } });
@@ -123,16 +134,41 @@ router.post('/', requireRole(...ADMIN_ROLES), async (req: Request, res: Response
     }
 
     const passwordHash = await bcrypt.hash(body.password, 12);
+
+    // Auto-resolve Stringee account_id from email if admin portal is
+    // configured and admin did not supply one (Zoho-style behaviour).
+    let resolvedAccountId = body.stringeeAccountId?.trim() || null;
+    if (!resolvedAccountId && body.stringeeEmail && isStringeeXAdminConfigured()) {
+      try {
+        resolvedAccountId = await resolveStringeeAccountIdByEmail(body.stringeeEmail);
+      } catch (err) {
+        console.warn('[stringeex] auto-resolve on create failed:', (err as Error).message);
+      }
+    }
+
     const user = await prisma.user.create({
       data: {
         name: body.name,
         email: body.email,
+        stringeeEmail: body.stringeeEmail || null,
+        stringeeAccountId: resolvedAccountId,
         passwordHash,
         role: body.role,
         branchId,
         teamId: body.teamId || null,
       },
-      select: { id: true, name: true, email: true, role: true, branchId: true, status: true, teamId: true, createdAt: true },
+      select: {
+        id: true,
+        name: true,
+        email: true,
+        stringeeEmail: true,
+        stringeeAccountId: true,
+        role: true,
+        branchId: true,
+        status: true,
+        teamId: true,
+        createdAt: true,
+      },
     });
     res.status(201).json({ success: true, data: user });
   } catch (err) {
@@ -154,10 +190,39 @@ router.put('/:id', requireRole(...ADMIN_ROLES), async (req: Request, res: Respon
       const taken = await prisma.user.findUnique({ where: { email: body.email } });
       if (taken) throw new AppError(409, 'EMAIL_TAKEN', 'Email is already registered');
     }
+    if (body.stringeeEmail !== undefined && body.stringeeEmail !== existing.stringeeEmail) {
+      if (body.stringeeEmail) {
+        const stringeeEmailTaken = await prisma.user.findFirst({ where: { stringeeEmail: body.stringeeEmail, deletedAt: null } });
+        if (stringeeEmailTaken && stringeeEmailTaken.id !== existing.id) {
+          throw new AppError(409, 'STRINGEE_EMAIL_TAKEN', `Stringee email is already linked to ${stringeeEmailTaken.name} — clear it from them first`);
+        }
+      }
+    }
 
     const updateData: Record<string, unknown> = {};
     if (body.name) updateData.name = body.name;
     if (body.email) updateData.email = body.email;
+    if (body.stringeeEmail !== undefined) {
+      updateData.stringeeEmail = body.stringeeEmail || null;
+    }
+    if (body.stringeeAccountId !== undefined) {
+      const explicitId = body.stringeeAccountId?.trim() || null;
+      const emailChanged =
+        body.stringeeEmail !== undefined &&
+        (body.stringeeEmail || null) !== existing.stringeeEmail &&
+        body.stringeeEmail;
+      if (!explicitId && emailChanged && isStringeeXAdminConfigured()) {
+        // Email newly set/changed and no explicit account ID — auto-resolve.
+        try {
+          updateData.stringeeAccountId = await resolveStringeeAccountIdByEmail(body.stringeeEmail as string);
+        } catch (err) {
+          console.warn('[stringeex] auto-resolve on update failed:', (err as Error).message);
+          updateData.stringeeAccountId = null;
+        }
+      } else {
+        updateData.stringeeAccountId = explicitId;
+      }
+    }
     if (body.role) updateData.role = body.role;
     if (body.teamId !== undefined) updateData.teamId = body.teamId;
     if (body.status) {
@@ -169,7 +234,17 @@ router.put('/:id', requireRole(...ADMIN_ROLES), async (req: Request, res: Respon
     const user = await prisma.user.update({
       where: { id },
       data: updateData,
-      select: { id: true, name: true, email: true, role: true, status: true, teamId: true, updatedAt: true },
+      select: {
+        id: true,
+        name: true,
+        email: true,
+        stringeeEmail: true,
+        stringeeAccountId: true,
+        role: true,
+        status: true,
+        teamId: true,
+        updatedAt: true,
+      },
     });
     res.json({ success: true, data: user });
   } catch (err) {
@@ -212,20 +287,76 @@ router.post('/:id/reset-password', requireRole(...ADMIN_ROLES, 'supervisor'), as
   }
 });
 
+// ── POST /api/users/:id/sync-stringee ─────────────────────────────────
+// Re-fetch the agent's account_id from the StringeeX tenant portal and
+// store it on the user. Requires STRINGEEX_ADMIN_* env vars.
+
+router.post('/:id/sync-stringee', requireRole(...ADMIN_ROLES), async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    if (!isStringeeXAdminConfigured()) {
+      throw new AppError(
+        503,
+        'STRINGEEX_ADMIN_NOT_CONFIGURED',
+        'Set STRINGEEX_TENANT / STRINGEEX_ADMIN_EMAIL / STRINGEEX_ADMIN_PASSWORD on the backend to enable auto-sync',
+      );
+    }
+    const id = param(req, 'id');
+    const target = await prisma.user.findUnique({
+      where: { id },
+      select: { id: true, branchId: true, stringeeEmail: true },
+    });
+    if (!target) throw new AppError(404, 'USER_NOT_FOUND', 'User not found');
+    assertBranchAccess(req.user!, target.branchId);
+    if (!target.stringeeEmail) {
+      throw new AppError(400, 'STRINGEE_EMAIL_REQUIRED', 'Set the user\u2019s Stringee email before syncing');
+    }
+
+    let accountId: string | null = null;
+    try {
+      accountId = await resolveStringeeAccountIdByEmail(target.stringeeEmail);
+    } catch (err: any) {
+      throw new AppError(502, 'STRINGEEX_SYNC_FAILED', err.message || 'StringeeX lookup failed');
+    }
+
+    if (!accountId) {
+      throw new AppError(
+        404,
+        'STRINGEEX_AGENT_NOT_FOUND',
+        `No StringeeX agent found with email ${target.stringeeEmail}`,
+      );
+    }
+
+    const user = await prisma.user.update({
+      where: { id },
+      data: { stringeeAccountId: accountId },
+      select: { id: true, stringeeEmail: true, stringeeAccountId: true },
+    });
+    res.json({ success: true, data: user });
+  } catch (err) {
+    next(err);
+  }
+});
+
 // ── DELETE /api/users/:id (soft deactivate) ───────────────────────────
 
 router.delete('/:id', requireRole(...ADMIN_ROLES), async (req: Request, res: Response, next: NextFunction) => {
   try {
     const id = param(req, 'id');
-    if (id === req.user!.userId) throw new AppError(400, 'CANNOT_SELF_DELETE', 'Cannot deactivate your own account');
+    if (id === req.user!.userId) throw new AppError(400, 'CANNOT_SELF_DELETE', 'Cannot delete your own account');
 
-    const existing = await prisma.user.findUnique({ where: { id }, select: { branchId: true } });
+    const existing = await prisma.user.findFirst({ where: { id, deletedAt: null }, select: { branchId: true, email: true } });
     if (!existing) throw new AppError(404, 'USER_NOT_FOUND', 'User not found');
     assertBranchAccess(req.user!, existing.branchId);
 
-    await prisma.user.update({ where: { id }, data: { status: 'inactive' } });
+    // Soft delete: mark deletedAt, mark inactive, and free up the unique email
+    // by suffixing it so a future user can re-use the same address.
+    const tombstone = `${existing.email}__deleted_${Date.now()}`;
+    await prisma.user.update({
+      where: { id },
+      data: { deletedAt: new Date(), status: 'inactive', email: tombstone },
+    });
     await revokeAllRefreshTokens(id);
-    res.json({ success: true, data: { message: 'User deactivated' } });
+    res.json({ success: true, data: { message: 'User deleted' } });
   } catch (err) {
     next(err);
   }

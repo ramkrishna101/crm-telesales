@@ -2,8 +2,9 @@ import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { teamsService, usersService } from '../../services/crm.service';
 import AppLayout from '../../components/layout/AppLayout';
+import ConfirmDialog from '../../components/ui/ConfirmDialog';
 import toast from 'react-hot-toast';
-import { Plus, Edit2, Users, X, RefreshCw, UserPlus, UserMinus, Search } from 'lucide-react';
+import { Plus, Edit2, Users, X, RefreshCw, UserPlus, UserMinus, Search, Trash2 } from 'lucide-react';
 
 interface Team {
   id: string; name: string; description?: string;
@@ -121,6 +122,7 @@ export default function TeamsPage() {
   const qc = useQueryClient();
   const [showCreate, setShowCreate] = useState(false);
   const [editTeam, setEditTeam] = useState<Team | null>(null);
+  const [deleteTeam, setDeleteTeam] = useState<Team | null>(null);
   const [expandedTeam, setExpandedTeam] = useState<string | null>(null);
   const [search, setSearch] = useState('');
 
@@ -156,6 +158,12 @@ export default function TeamsPage() {
     mutationFn: ({ teamId, agentIds }: { teamId: string; agentIds: string[] }) =>
       teamsService.removeMembers(teamId, agentIds),
     onSuccess: () => { qc.invalidateQueries({ queryKey: ['teams'] }); toast.success('Member removed'); },
+  });
+
+  const deleteTeamMutation = useMutation({
+    mutationFn: (id: string) => teamsService.delete(id),
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ['teams'] }); toast.success('Team deleted'); setDeleteTeam(null); },
+    onError: (e: Error) => toast.error(e.message || 'Failed to delete team'),
   });
 
   const teams: Team[] = teamsData?.data?.data || [];
@@ -242,6 +250,14 @@ export default function TeamsPage() {
                     <button className="btn-icon" title="Manage Members" onClick={() => setExpandedTeam(expandedTeam === team.id ? null : team.id)}>
                       <Users size={15} />
                     </button>
+                    <button
+                      className="btn-icon"
+                      title="Delete team"
+                      style={{ color: '#ef4444' }}
+                      onClick={() => setDeleteTeam(team)}
+                    >
+                      <Trash2 size={15} />
+                    </button>
                   </div>
                 </div>
 
@@ -278,6 +294,22 @@ export default function TeamsPage() {
           }}
         />
       )}
+
+      <ConfirmDialog
+        open={!!deleteTeam}
+        title="Delete team?"
+        message={
+          <>
+            Are you sure you want to delete <strong>{deleteTeam?.name}</strong>?{' '}
+            {'\n\n'}All members will be unlinked from this team. Campaigns and historical data are preserved.
+          </>
+        }
+        confirmLabel="Delete team"
+        variant="danger"
+        loading={deleteTeamMutation.isPending}
+        onConfirm={() => deleteTeam && deleteTeamMutation.mutate(deleteTeam.id)}
+        onCancel={() => setDeleteTeam(null)}
+      />
     </AppLayout>
   );
 }

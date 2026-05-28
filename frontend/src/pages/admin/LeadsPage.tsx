@@ -1,10 +1,13 @@
-import { useState, useRef } from 'react';
+import { useState, useRef, useSyncExternalStore } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { leadsService, usersService, campaignsService } from '../../services/crm.service';
+import { leadsService, usersService, campaignsService, tagsService } from '../../services/crm.service';
 import AppLayout from '../../components/layout/AppLayout';
+import ConfirmDialog from '../../components/ui/ConfirmDialog';
+import Dropdown from '../../components/ui/Dropdown';
 import toast from 'react-hot-toast';
 import * as XLSX from 'xlsx';
-import { Upload, Search, RefreshCw, ChevronLeft, ChevronRight, Download, FileSpreadsheet, CheckCircle2, X, UserCheck } from 'lucide-react';
+import { Upload, Search, RefreshCw, ChevronLeft, ChevronRight, Download, FileSpreadsheet, CheckCircle2, X, UserCheck, PhoneCall, Trash2 } from 'lucide-react';
+import { stringeeService } from '../../services/stringee.service';
 
 // ── Export Leads to Excel ─────────────────────────────────────────────
 
@@ -39,6 +42,9 @@ async function exportLeads(
       Disposition: l.status,
       Priority: l.priority,
       DND: (l.isDnd as boolean) ? 'Yes' : 'No',
+      'Last Call Result': l.lastCallResult ?? '',
+      Language: l.lastCallLanguage ?? '',
+      'Last Call Description': l.lastCallDescription ?? '',
       Campaign: campaignMap[(l.campaignId as string)] ?? l.campaignId,
       'Assigned To': l.assignedToId ? (agentMap[(l.assignedToId as string)] ?? l.assignedToId) : 'Unassigned',
       'Last Called': l.lastCalledAt ? new Date(l.lastCalledAt as string).toLocaleString() : '',
@@ -293,20 +299,34 @@ export default function LeadsPage() {
   const [campaignFilter, setCampaignFilter] = useState('');
   const [statusFilter, setStatusFilter] = useState('');
   const [agentFilter, setAgentFilter] = useState('');
+  // Draft + applied state for callResult / followUpStatus (Apply/Reset pattern)
+  const [draftCallResult, setDraftCallResult] = useState('');
+  const [draftFollowUp, setDraftFollowUp] = useState('');
+  const [callResultFilter, setCallResultFilter] = useState('');
+  const [followUpFilter, setFollowUpFilter] = useState('');
   const [search, setSearch] = useState('');
   const [page, setPage] = useState(1);
   const [showUpload, setShowUpload] = useState(false);
   const [selected, setSelected] = useState<string[]>([]);
+  const [confirmDelete, setConfirmDelete] = useState<string[] | null>(null);
   const LIMIT = 50;
 
+  const hasUnapplied = draftCallResult !== callResultFilter || draftFollowUp !== followUpFilter;
+  const hasActiveFilters = !!(callResultFilter || followUpFilter || draftCallResult || draftFollowUp);
+
+  const applyFilters = () => { setCallResultFilter(draftCallResult); setFollowUpFilter(draftFollowUp); setPage(1); };
+  const resetFilters = () => { setDraftCallResult(''); setDraftFollowUp(''); setCallResultFilter(''); setFollowUpFilter(''); setPage(1); };
+
   const { data: leadsData, isLoading } = useQuery({
-    queryKey: ['leads', page, campaignFilter, statusFilter, agentFilter],
+    queryKey: ['leads', page, campaignFilter, statusFilter, agentFilter, callResultFilter, followUpFilter],
     queryFn: () => leadsService.list({ 
       page, 
       limit: LIMIT, 
       ...(campaignFilter ? { campaignId: campaignFilter } : {}), 
       ...(statusFilter ? { status: statusFilter } : {}),
-      ...(agentFilter ? { assignedToId: agentFilter } : {})
+      ...(agentFilter ? { assignedToId: agentFilter } : {}),
+      ...(callResultFilter ? { callResult: callResultFilter } : {}),
+      ...(followUpFilter ? { followUpStatus: followUpFilter } : {}),
     }),
   });
 
@@ -320,6 +340,13 @@ export default function LeadsPage() {
     queryFn: () => usersService.list({ role: 'agent', limit: 100 }),
   });
 
+  const { data: tagsData } = useQuery({
+    queryKey: ['disposition-tags'],
+    queryFn: () => tagsService.list(),
+    staleTime: 5 * 60 * 1000,
+  });
+  const dispositionTags: { name: string; color?: string | null }[] = tagsData?.data?.data || tagsData?.data || [];
+
   const assignMutation = useMutation({
     mutationFn: ({ leadIds, agentId }: { leadIds: string[]; agentId: string }) =>
       leadsService.assign(leadIds, agentId),
@@ -329,6 +356,17 @@ export default function LeadsPage() {
   const reclaimMutation = useMutation({
     mutationFn: (leadIds: string[]) => leadsService.reclaim(leadIds),
     onSuccess: () => { qc.invalidateQueries({ queryKey: ['leads'] }); toast.success('Leads reclaimed'); setSelected([]); },
+  });
+
+  const deleteMutation = useMutation({
+    mutationFn: (leadIds: string[]) => leadsService.delete(leadIds),
+    onSuccess: (res) => {
+      qc.invalidateQueries({ queryKey: ['leads'] });
+      toast.success(res.data.data.message);
+      setSelected([]);
+      setConfirmDelete(null);
+    },
+    onError: () => toast.error('Failed to delete leads'),
   });
 
   const assignCampaignMutation = useMutation({
@@ -346,6 +384,7 @@ export default function LeadsPage() {
   const campaigns = campaignsData?.data?.data?.campaigns || [];
   const agents = agentsData?.data?.data?.users || [];
   const pages = Math.ceil(total / LIMIT);
+  const callState = useSyncExternalStore(stringeeService.subscribe, stringeeService.getSnapshot);
 
   const statusColour: Record<string, string> = {
     uncontacted: '#6f63ff', contacted: '#3b82f6', lead: '#1f9d55',
@@ -358,6 +397,14 @@ export default function LeadsPage() {
 
   const toggleSelect = (id: string) =>
     setSelected((s) => s.includes(id) ? s.filter((x) => x !== id) : [...s, id]);
+
+  const handleCall = async (lead: Lead) => {
+    try {
+      await stringeeService.startCall(lead.id, lead.name || 'Lead');
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : 'Unable to start call');
+    }
+  };
 
   return (
     <AppLayout>
@@ -378,6 +425,13 @@ export default function LeadsPage() {
                 <button className="btn btn-secondary" onClick={() => reclaimMutation.mutate(selected)}>
                   Reclaim {selected.length}
                 </button>
+                <button
+                  className="btn btn-secondary"
+                  style={{ color: '#ef4444', borderColor: '#ef4444' }}
+                  onClick={() => setConfirmDelete(selected)}
+                >
+                  <Trash2 size={14} /> Delete {selected.length}
+                </button>
               </>
             )}
             <button className="btn btn-secondary" onClick={downloadTemplate}>
@@ -390,6 +444,8 @@ export default function LeadsPage() {
                   ...(campaignFilter ? { campaignId: campaignFilter } : {}),
                   ...(statusFilter ? { status: statusFilter } : {}),
                   ...(agentFilter ? { assignedToId: agentFilter } : {}),
+                  ...(callResultFilter ? { callResult: callResultFilter } : {}),
+                  ...(followUpFilter ? { followUpStatus: followUpFilter } : {}),
                 },
                 campaigns as { id: string; name: string }[],
                 agents as { id: string; name: string }[],
@@ -445,6 +501,40 @@ export default function LeadsPage() {
             <option value="null">Unassigned</option>
             {(agents as Record<string, string>[]).map((a) => <option key={a.id} value={a.id}>{a.name}</option>)}
           </select>
+          <Dropdown
+            value={draftFollowUp}
+            onChange={setDraftFollowUp}
+            placeholder="All followup statuses"
+            options={[
+              { value: '', label: 'All followup statuses' },
+              { value: 'pending',   label: 'Pending',   colour: '#f59e0b' },
+              { value: 'completed', label: 'Completed', colour: '#22c55e' },
+              { value: 'missed',    label: 'Missed',    colour: '#ef4444' },
+            ]}
+          />
+          <Dropdown
+            value={draftCallResult}
+            onChange={setDraftCallResult}
+            placeholder="All call results"
+            options={[
+              { value: '', label: 'All call results' },
+              ...dispositionTags.map((t) => ({ value: t.name, label: t.name, colour: t.color || undefined })),
+            ]}
+          />
+          <div style={{ display: 'flex', gap: 6 }}>
+            <button
+              type="button"
+              onClick={applyFilters}
+              disabled={!hasUnapplied}
+              style={{ height: 36, padding: '0 14px', fontSize: 13, fontWeight: 600, borderRadius: 8, border: 'none', cursor: hasUnapplied ? 'pointer' : 'not-allowed', background: hasUnapplied ? '#4f46e5' : '#cbd5e1', color: '#fff', transition: 'background 120ms' }}
+            >Apply</button>
+            <button
+              type="button"
+              onClick={resetFilters}
+              disabled={!hasActiveFilters}
+              style={{ height: 36, padding: '0 12px', fontSize: 13, fontWeight: 500, borderRadius: 8, border: '1px solid #cbd5e1', cursor: hasActiveFilters ? 'pointer' : 'not-allowed', background: 'var(--bg-surface)', color: hasActiveFilters ? '#475569' : '#cbd5e1' }}
+            >Reset</button>
+          </div>
           <div className="filter-tabs">
             {['', 'uncontacted', 'contacted', 'lead', 'callback', 'not_interested', 'invalid', 'dnd'].map((s) => (
               <button key={s} className={`filter-tab ${statusFilter === s ? 'filter-tab--active' : ''}`} onClick={() => { setStatusFilter(s); setPage(1); }}>
@@ -463,6 +553,7 @@ export default function LeadsPage() {
             <div className="table-col">Priority</div>
             <div className="table-col">Assigned To</div>
             <div className="table-col">Last Called</div>
+            <div className="table-col">Actions</div>
           </div>
           {isLoading && <div className="empty-state"><RefreshCw className="spin" size={20} /><p>Loading…</p></div>}
           {leads
@@ -493,6 +584,27 @@ export default function LeadsPage() {
               <div className="table-cell" style={{ color: 'var(--text-muted)', fontSize: '0.78rem' }}>
                 {l.lastCalledAt ? new Date(l.lastCalledAt).toLocaleString() : '—'}
               </div>
+              <div className="table-cell">
+                <button
+                  className="btn btn-secondary"
+                  style={{ padding: '6px 10px', fontSize: '0.76rem' }}
+                  disabled={!l.phone || l.isDnd || (
+                    !!callState.activeLeadId && callState.activeLeadId !== l.id &&
+                    ['dialing', 'ringing', 'in_call'].includes(callState.callStatus)
+                  )}
+                  onClick={() => void handleCall(l)}
+                >
+                  <PhoneCall size={14} /> {callState.activeLeadId === l.id && ['dialing', 'ringing', 'in_call'].includes(callState.callStatus) ? 'Calling' : 'Call'}
+                </button>
+                <button
+                  className="btn-icon"
+                  title="Delete lead"
+                  style={{ color: '#ef4444', marginLeft: 4 }}
+                  onClick={() => setConfirmDelete([l.id])}
+                >
+                  <Trash2 size={14} />
+                </button>
+              </div>
             </div>
           ))}
           {!isLoading && leads.length === 0 && (
@@ -513,6 +625,21 @@ export default function LeadsPage() {
           </div>
         )}
       </div>
+
+      <ConfirmDialog
+        open={!!confirmDelete}
+        title={confirmDelete?.length === 1 ? 'Delete lead?' : `Delete ${confirmDelete?.length} leads?`}
+        message={
+          confirmDelete?.length === 1
+            ? 'This lead will be permanently hidden. Call logs and history are preserved.'
+            : `${confirmDelete?.length} leads will be permanently hidden. Call logs and history are preserved.`
+        }
+        confirmLabel={confirmDelete?.length === 1 ? 'Delete lead' : `Delete ${confirmDelete?.length} leads`}
+        variant="danger"
+        loading={deleteMutation.isPending}
+        onConfirm={() => confirmDelete && deleteMutation.mutate(confirmDelete)}
+        onCancel={() => setConfirmDelete(null)}
+      />
     </AppLayout>
   );
 }
