@@ -10,6 +10,7 @@ The mobile experience should feel like a dedicated application rather than a com
 
 This design covers agent-only mobile behavior for:
 
+- Shared login page on mobile, visually optimized for agent-first use
 - Dashboard
 - My Leads
 - Follow-ups
@@ -38,6 +39,28 @@ This design does not add new business filters, new lead actions, or new status f
 - The dock is icon-only with no text labels.
 - The dock must be visually attached to the bottom edge like a native mobile app tab bar.
 - The dock must be smaller and tighter than the early mockups; no oversized floating bar treatment.
+
+### Mobile login
+
+- The login flow remains shared for all roles.
+- Mobile login is visually optimized for agent-first usage, but does not create a separate auth flow.
+- Desktop keeps the current centered card composition.
+- Mobile uses a dedicated app-style stacked composition instead of forcing the desktop card layout onto phone screens.
+- Mobile login keeps the current authentication fields only:
+  - Email
+  - Password
+- Mobile login must not add role pickers, phone login, sign-up flow, or any new auth behavior.
+- The approved visual composition uses:
+  - a dark CRM-branded top section
+  - a single `TeleCRM` brand mark above the form
+  - a rounded white bottom sheet-style form container
+  - the current CRM blue palette for the primary action
+- The extra subtitle under the brand mark is removed in the approved direction.
+- The mobile login form keeps the current helper affordances already shown in the design direction:
+  - remember me
+  - help / support affordance
+- The mobile login CTA remains a single primary Continue / Sign In action sized for thumb use.
+- Desktop auth behavior, validation, redirects, and role routing remain unchanged.
 
 ### Dashboard landing screen
 
@@ -101,14 +124,34 @@ This design does not add new business filters, new lead actions, or new status f
   - Log / save outcome
 - This flow must reuse the current business logic and validation already present in the desktop implementation.
 
+### Mobile call widget
+
+- Mobile must include the existing Stringee call widget as a first-class surface.
+- The mobile call widget must preserve the current desktop popup capabilities instead of inventing a new calling flow.
+- The approved mobile call widget includes:
+  - call state label
+  - lead identity and phone
+  - active call timer
+  - source hotline selector
+  - current error area with dismiss action when applicable
+  - mute control
+  - disconnect control
+  - log action
+- The mute and disconnect controls are intentionally reduced and balanced to the same visual size.
+- The controls must feel compact on mobile and should not dominate the panel.
+- The widget remains visually aligned with the CRM blue palette and existing call-state semantics.
+- Post-call outcome handling still hands off to the approved mobile outcome sheet rather than introducing a separate mobile-only flow.
+
 ## Architecture
 
 ### Layout strategy
 
 - Keep the current desktop layout intact.
+- Keep the current desktop login layout intact.
 - Add a mobile-specific agent shell that activates only below the chosen phone breakpoint.
 - The agent shell swaps the desktop sidebar for the mobile bottom dock and mobile page spacing.
 - Desktop routes remain the same; mobile changes are presentational and interaction-layer changes on top of existing route structure.
+- The login page gets a mobile-only app-style layout branch while preserving the current desktop card layout.
 
 ### Screen strategy
 
@@ -120,6 +163,9 @@ This design does not add new business filters, new lead actions, or new status f
 
 Recommended component boundaries:
 
+- `MobileLoginShell`
+  - renders the mobile-specific app-style auth composition
+  - reuses the current login form state and submit flow
 - `AgentMobileDock`
   - renders the 5-action bottom dock
   - owns active-state styling only
@@ -133,8 +179,18 @@ Recommended component boundaries:
   - renders existing desktop filters in a mobile sheet
 - `AgentOutcomeSheet`
   - mobile presentation wrapper around the existing desktop post-call outcome fields and submit flow
+- `MobileCallWidget`
+  - mobile presentation wrapper around the existing Stringee popup state and actions
+  - keeps compact call controls and hotline selection in the approved mobile layout
 
 These components should remain presentational where possible and receive state/actions from the current page-level logic.
+
+### Auth flow
+
+- Mobile login submits through the same current login request and auth-store flow as desktop.
+- Validation rules remain the same as the current email/password form.
+- Successful login continues to use the current role-based redirect rules.
+- Mobile presentation must not fork token handling, auth persistence, or unauthorized behavior.
 
 ## Data Flow
 
@@ -161,8 +217,14 @@ These components should remain presentational where possible and receive state/a
 - Mobile outcome submission uses the same calls, follow-up, and lead status services already used by `PostCallOutcomeModal`.
 - Existing rules for required call result, optional follow-up scheduling, and cache invalidation remain unchanged.
 
+### Call state
+
+- Mobile call controls use the same Stringee service state already used by the desktop popup.
+- Hotline selection, mute state, active-call restriction, hangup behavior, and outcome visibility remain driven by the existing calling service and store.
+
 ## Error Handling
 
+- If login fails on mobile, show the same authentication error treatment already used by the current login flow.
 - If filters fail to load or apply, show the same error message patterns currently used by the agent surfaces.
 - If outcome logging fails, preserve the sheet contents and show the same failure toast/error treatment used today.
 - If a call cannot start because another call is active, preserve the existing blocked-call behavior.
@@ -182,26 +244,32 @@ These components should remain presentational where possible and receive state/a
 
 ### Functional validation
 
+- Verify mobile login keeps the current email/password auth flow and correct role redirect behavior.
 - Verify agent mobile navigation switches correctly across Dashboard, My Leads, Follow-ups, Calls, and Profile entry.
 - Verify My Leads cards render the same lead data already available on desktop.
 - Verify previous/next arrows move across the lead list without overlapping the dock.
 - Verify Filters button opens the sheet and applies only existing desktop filters.
 - Verify outcome/status sheet submits through the existing desktop-backed logic.
+- Verify the mobile call widget exposes the same hotline, mute, hangup, error, and log capabilities already available in the desktop popup.
 
 ### Responsive validation
 
+- Validate the login page uses the approved app-style composition on narrow mobile widths while desktop keeps the existing login card layout.
 - Validate phone layouts on narrow mobile widths.
 - Validate that desktop layout remains unchanged at tablet and desktop widths.
 - Validate that bottom dock never covers lead card content or sheet actions.
+- Validate the mobile call widget controls remain compact and fully visible on smaller phone heights.
 
 ### Regression validation
 
+- Verify current desktop login still works unchanged.
 - Verify current agent desktop filtering and lead actions still work unchanged.
 - Verify call initiation, post-call logging, and follow-up scheduling keep current behavior.
 - Verify route guards and auth behavior are unaffected.
 
 ## Out of Scope
 
+- Adding new login methods or role-selection steps
 - Adding campaign filter to agent leads
 - Adding new lead fields not already exposed on desktop
 - Changing backend query behavior for agent mobile only
