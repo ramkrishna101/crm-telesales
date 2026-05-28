@@ -680,6 +680,39 @@ class StringeeService {
     });
   };
 
+  resetSession = () => {
+    this.clearTimer();
+    this.detachRemoteAudio();
+    if (this.call) {
+      try {
+        this.call.hangup(() => {});
+      } catch {
+        // ignore
+      }
+    }
+    if (this.client) {
+      try {
+        this.client.disconnect?.();
+      } catch {
+        // ignore
+      }
+    }
+
+    this.call = null;
+    this.client = null;
+    this.connectPromise = null;
+    this.currentUserId = null;
+    this.serverAddrs = null;
+    this.hotlines = null;
+    this.callStartedAt = null;
+    this.callAnsweredAt = null;
+    this.currentCallId = null;
+    this.currentFromNumber = null;
+    this.sdkPromise = null;
+    this.snapshot = { ...initialSnapshot };
+    this.emit();
+  };
+
   clearError = () => {
     this.update({ error: null });
   };

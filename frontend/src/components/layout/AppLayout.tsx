@@ -43,7 +43,7 @@ const supervisorNav: NavItem[] = [
 
 const agentNav: NavItem[] = [
   { icon: <LayoutDashboard size={18} />, label: 'Workspace', to: '/agent' },
-  { icon: <Users size={18} />, label: 'Interested Leads', to: '/agent/leads' },
+  { icon: <Users size={18} />, label: 'My Leads', to: '/agent/leads' },
   { icon: <ListChecks size={18} />, label: 'Follow-ups', to: '/agent/follow-ups' },
   { icon: <PhoneCall size={18} />, label: 'Call History', to: '/agent/calls' },
 ];

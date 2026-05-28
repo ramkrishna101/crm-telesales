@@ -72,9 +72,13 @@ const helmetConfig = helmet({
       "connect-src": [
         "'self'",
         'https://*.stringee.com',
+        'https://*.stringee.com:*',
         'wss://*.stringee.com',
+        'wss://*.stringee.com:*',
         'https://*.stringeex.com',
+        'https://*.stringeex.com:*',
         'wss://*.stringeex.com',
+        'wss://*.stringeex.com:*',
       ],
     },
   },
