@@ -1,6 +1,8 @@
+import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { usersService, campaignsService, leadsService, callsService } from '../../services/crm.service';
 import AppLayout from '../../components/layout/AppLayout';
+import DateRangeFilter, { computeRange, type DateRangeValue } from '../../components/ui/DateRangeFilter';
 import { Users, FolderOpen, Phone, TrendingUp, UserCheck, Clock, AlertCircle, ChevronRight } from 'lucide-react';
 import { Link } from 'react-router-dom';
 
@@ -91,6 +93,19 @@ function AgentRow({ u }: { u: Record<string, unknown> }) {
 // ── Admin Dashboard ───────────────────────────────────────────────────
 
 export default function AdminDashboard() {
+  // Date range filter — defaults to last 7 days to match prior behaviour.
+  const [dateRange, setDateRange] = useState<DateRangeValue>(() => {
+    const r = computeRange('last_7_days');
+    return { preset: 'last_7_days', from: r.from, to: r.to };
+  });
+  const dateParams = { from: dateRange.from, to: dateRange.to };
+  const rangeLabel =
+    dateRange.preset === 'today' ? 'Today' :
+    dateRange.preset === 'yesterday' ? 'Yesterday' :
+    dateRange.preset === 'this_month' ? 'This month' :
+    dateRange.preset === 'last_7_days' ? 'Last 7 days' :
+    `${dateRange.from} → ${dateRange.to}`;
+
   const { data: usersData } = useQuery({
     queryKey: ['users', 'all'],
     queryFn: () => usersService.list({ limit: 100 }),
@@ -102,13 +117,13 @@ export default function AdminDashboard() {
   });
 
   const { data: leadsData } = useQuery({
-    queryKey: ['leads', 'dashboard'],
-    queryFn: () => leadsService.list({ limit: 1 }),
+    queryKey: ['leads', 'dashboard', dateRange.from, dateRange.to],
+    queryFn: () => leadsService.list({ limit: 1, ...dateParams }),
   });
 
   const { data: callsSummary } = useQuery({
-    queryKey: ['calls', 'summary'],
-    queryFn: () => callsService.summary(),
+    queryKey: ['calls', 'summary', dateRange.from, dateRange.to],
+    queryFn: () => callsService.summary(dateParams),
   });
 
   const users = (usersData?.data?.data?.users || []) as Record<string, unknown>[];
@@ -133,6 +148,7 @@ export default function AdminDashboard() {
           </div>
 
           <div className="page-actions">
+            <DateRangeFilter value={dateRange} onChange={setDateRange} />
             <div className="ops-pill">{activeCampaigns} live campaigns</div>
             <Link to="/admin/campaigns" className="btn btn-primary">
               + New Campaign
@@ -146,7 +162,7 @@ export default function AdminDashboard() {
               <span className="metric-ribbon__sub">currently dialing or available</span>
             </div>
             <div className="metric-ribbon__item">
-              <span className="metric-ribbon__label">7 day connect rate</span>
+              <span className="metric-ribbon__label">{rangeLabel} connect rate</span>
               <strong className="metric-ribbon__value">{connectRate}%</strong>
               <span className="metric-ribbon__sub">connected vs total calls</span>
             </div>
@@ -158,7 +174,7 @@ export default function AdminDashboard() {
             <div className="metric-ribbon__item">
               <span className="metric-ribbon__label">Lead inventory</span>
               <strong className="metric-ribbon__value">{totalLeads.toLocaleString()}</strong>
-              <span className="metric-ribbon__sub">across all campaigns</span>
+              <span className="metric-ribbon__sub">created in {rangeLabel.toLowerCase()}</span>
             </div>
           </div>
         </section>
@@ -175,12 +191,12 @@ export default function AdminDashboard() {
             colour="#22d3ee"
           />
           <StatCard
-            icon={<UserCheck size={22} />} label="Total Leads"
-            value={totalLeads.toLocaleString()} sub="across all campaigns"
+            icon={<UserCheck size={22} />} label="New Leads"
+            value={totalLeads.toLocaleString()} sub={`created in ${rangeLabel.toLowerCase()}`}
             colour="#22c55e" trend={8}
           />
           <StatCard
-            icon={<Phone size={22} />} label="Calls (7 days)"
+            icon={<Phone size={22} />} label={`Calls (${rangeLabel.toLowerCase()})`}
             value={totalCalls.toLocaleString()} sub="total connected"
             colour="#f59e0b"
           />
@@ -194,7 +210,7 @@ export default function AdminDashboard() {
                   <div className="card-kicker">Call health</div>
                   <h2 className="card-title">Disposition Breakdown</h2>
                 </div>
-                <span className="card-subtitle">Last 7 days</span>
+                <span className="card-subtitle">{rangeLabel}</span>
               </div>
               <div className="card-body">
                 {callData?.tagBreakdown?.length ? (
