@@ -103,6 +103,7 @@ router.get('/', async (req: Request, res: Response, next: NextFunction) => {
 
     if (callerRole === 'agent') {
       where.assignedToId = userId;
+      where.branchId = getUserBranchId(req.user!);
     } else if (callerRole === 'supervisor') {
       where = { deletedAt: null, campaign: { team: { supervisorId: userId } } };
     } else if (!isSuperAdmin(callerRole)) {
@@ -325,8 +326,21 @@ router.post('/assign', requireRole(...ADMIN_ROLES, 'supervisor'), async (req: Re
   try {
     const { leadIds, agentId } = assignSchema.parse(req.body);
 
-    const agent = await prisma.user.findUnique({ where: { id: agentId } });
+    const agent = await prisma.user.findUnique({ where: { id: agentId }, select: { id: true, name: true, role: true, branchId: true } });
     if (!agent || agent.role !== 'agent') throw new AppError(400, 'INVALID_AGENT', 'Target user is not an agent');
+    assertBranchAccess(req.user!, agent.branchId);
+
+    const leads = await prisma.lead.findMany({
+      where: { id: { in: leadIds }, deletedAt: null },
+      select: { id: true, branchId: true },
+    });
+    if (leads.length !== leadIds.length) throw new AppError(404, 'LEAD_NOT_FOUND', 'One or more leads were not found');
+
+    const crossBranchLead = leads.find((lead) => lead.branchId !== agent.branchId);
+    if (crossBranchLead) {
+      throw new AppError(400, 'CROSS_BRANCH_ASSIGNMENT_BLOCKED', 'Lead and agent must belong to the same branch');
+    }
+    leads.forEach((lead) => assertBranchAccess(req.user!, lead.branchId));
 
     // Assign ALL selected leads — including already-assigned ones (re-assign)
     const result = await prisma.lead.updateMany({
@@ -350,11 +364,16 @@ router.post('/assign-campaign', requireRole(...ADMIN_ROLES, 'supervisor'), async
       agentId: z.string().uuid(),
     }).parse(req.body);
 
-    const agent = await prisma.user.findUnique({ where: { id: agentId } });
+    const agent = await prisma.user.findUnique({ where: { id: agentId }, select: { id: true, name: true, role: true, branchId: true } });
     if (!agent || agent.role !== 'agent') throw new AppError(400, 'INVALID_AGENT', 'Target user is not an agent');
+    assertBranchAccess(req.user!, agent.branchId);
 
-    const campaign = await prisma.campaign.findUnique({ where: { id: campaignId } });
+    const campaign = await prisma.campaign.findUnique({ where: { id: campaignId }, select: { id: true, name: true, branchId: true } });
     if (!campaign) throw new AppError(404, 'CAMPAIGN_NOT_FOUND', 'Campaign not found');
+    assertBranchAccess(req.user!, campaign.branchId);
+    if (campaign.branchId !== agent.branchId) {
+      throw new AppError(400, 'CROSS_BRANCH_ASSIGNMENT_BLOCKED', 'Campaign and agent must belong to the same branch');
+    }
 
     const result = await prisma.lead.updateMany({
       where: { campaignId, assignedToId: null },
