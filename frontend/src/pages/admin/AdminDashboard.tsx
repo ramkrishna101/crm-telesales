@@ -3,6 +3,7 @@ import { useQuery } from '@tanstack/react-query';
 import { usersService, campaignsService, leadsService, callsService } from '../../services/crm.service';
 import AppLayout from '../../components/layout/AppLayout';
 import DateRangeFilter, { computeRange, type DateRangeValue } from '../../components/ui/DateRangeFilter';
+import Dropdown from '../../components/ui/Dropdown';
 import { Users, FolderOpen, Phone, TrendingUp, UserCheck, Clock, AlertCircle, ChevronRight } from 'lucide-react';
 import { Link } from 'react-router-dom';
 
@@ -157,19 +158,21 @@ export default function AdminDashboard() {
 
           <div className="page-actions">
             <DateRangeFilter value={dateRange} onChange={setDateRange} />
-            <select
-              className="form-input"
-              value={campaignFilter}
-              onChange={(e) => setCampaignFilter(e.target.value)}
-              style={{ minWidth: 220, height: 38 }}
-            >
-              <option value="">All Campaigns</option>
-              {campaigns.map((campaign) => (
-                <option key={campaign.id as string} value={campaign.id as string}>
-                  {campaign.name as string}
-                </option>
-              ))}
-            </select>
+            <div style={{ minWidth: 220 }}>
+              <Dropdown
+                value={campaignFilter}
+                onChange={setCampaignFilter}
+                placeholder="All Campaigns"
+                height={38}
+                options={[
+                  { value: '', label: 'All Campaigns' },
+                  ...campaigns.map((campaign) => ({
+                    value: campaign.id as string,
+                    label: campaign.name as string,
+                  })),
+                ]}
+              />
+            </div>
             <div className="ops-pill">
               {selectedCampaign ? `${selectedCampaign.name as string}` : `${activeCampaigns} live campaigns`}
             </div>

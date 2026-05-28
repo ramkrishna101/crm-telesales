@@ -489,15 +489,29 @@ export default function LeadsPage() {
             <Search size={15} className="search-icon" />
             <input className="search-input" placeholder="Search by name…" value={search} onChange={(e) => setSearch(e.target.value)} />
           </div>
-          <select className="form-input" style={{ width: 180 }} value={campaignFilter} onChange={(e) => { setCampaignFilter(e.target.value); setPage(1); }}>
-            <option value="">All Campaigns</option>
-            {(campaigns as Record<string, string>[]).map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
-          </select>
-          <select className="form-input" style={{ width: 180 }} value={agentFilter} onChange={(e) => { setAgentFilter(e.target.value); setPage(1); }}>
-            <option value="">All Agents</option>
-            <option value="null">Unassigned</option>
-            {(agents as Record<string, string>[]).map((a) => <option key={a.id} value={a.id}>{a.name}</option>)}
-          </select>
+          <div style={{ width: 180 }}>
+            <Dropdown
+              value={campaignFilter}
+              onChange={(value) => { setCampaignFilter(value); setPage(1); }}
+              placeholder="All Campaigns"
+              options={[
+                { value: '', label: 'All Campaigns' },
+                ...(campaigns as Record<string, string>[]).map((c) => ({ value: c.id, label: c.name })),
+              ]}
+            />
+          </div>
+          <div style={{ width: 180 }}>
+            <Dropdown
+              value={agentFilter}
+              onChange={(value) => { setAgentFilter(value); setPage(1); }}
+              placeholder="All Agents"
+              options={[
+                { value: '', label: 'All Agents' },
+                { value: 'null', label: 'Unassigned' },
+                ...(agents as Record<string, string>[]).map((a) => ({ value: a.id, label: a.name })),
+              ]}
+            />
+          </div>
           <Dropdown
             value={draftFollowUp}
             onChange={setDraftFollowUp}
