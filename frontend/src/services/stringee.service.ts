@@ -224,9 +224,6 @@ class StringeeService {
     }
   }
 
-  clearError() {
-    this.update({ error: null });
-  }
   private async fetchAgentToken(): Promise<{ authToken: string; accountId: string | null; email: string }> {
     this.update({ connectionStatus: 'fetching-token' });
     let res;

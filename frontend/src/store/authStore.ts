@@ -9,6 +9,8 @@ export interface AuthUser {
   id: string;
   name: string;
   email: string;
+  stringeeEmail?: string | null;
+  stringeeAccountId?: string | null;
   role: Role;
   branchId: string | null;
   teamId: string | null;
