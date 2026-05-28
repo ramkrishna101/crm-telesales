@@ -17,6 +17,7 @@ import callsRoutes from './modules/calls/calls.routes';
 import tagsRoutes from './modules/calls/tags.routes';
 import followUpsRoutes from './modules/follow-ups/followUps.routes';
 import agentRoutes from './modules/agent/agent.routes';
+import stringeeRoutes from './modules/stringee/stringee.routes';
 import { startLeadUploadWorker } from './jobs/leadUpload.worker';
 import { startFollowUpReminderJob } from './jobs/followUpReminder.job';
 import { verifyAccessToken } from './lib/jwt';
@@ -63,6 +64,22 @@ const app = express();
 app.set('trust proxy', 1); // Required for express-rate-limit behind Railway/Render proxy
 const httpServer = createServer(app);
 
+const helmetConfig = helmet({
+  contentSecurityPolicy: {
+    directives: {
+      ...helmet.contentSecurityPolicy.getDefaultDirectives(),
+      "script-src": ["'self'", 'https://cdn.stringee.com'],
+      "connect-src": [
+        "'self'",
+        'https://*.stringee.com',
+        'wss://*.stringee.com',
+        'https://*.stringeex.com',
+        'wss://*.stringeex.com',
+      ],
+    },
+  },
+});
+
 // ── Socket.io Setup ───────────────────────────────────────────────────
 const io = new SocketServer(httpServer, {
   cors: {
@@ -100,7 +117,7 @@ io.on('connection', (socket) => {
 export { io };
 
 // ── Express Middleware ────────────────────────────────────────────────
-app.use(helmet());
+app.use(helmetConfig);
 app.use(cors({
   origin: corsOrigin,
   credentials: true,
@@ -162,6 +179,7 @@ app.use('/api/calls', callsRoutes);
 app.use('/api/tags', tagsRoutes);
 app.use('/api/follow-ups', followUpsRoutes);
 app.use('/api/agent', agentRoutes);
+app.use('/api/stringee', stringeeRoutes);
 // TODO (Task 2.x): app.use('/api/analytics', analyticsRoutes);
 
 // ── Static Frontend Serving (Unified Deployment) ───────────────────────

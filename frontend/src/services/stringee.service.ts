@@ -13,6 +13,24 @@ function extractApiError(err: unknown, fallback: string): Error {
   return err instanceof Error ? err : new Error(fallback);
 }
 
+function extractHotlinesPayload(data: unknown): string[] {
+  if (Array.isArray((data as { data?: { hotlines?: unknown } } | undefined)?.data?.hotlines)) {
+    return ((data as { data: { hotlines: unknown[] } }).data.hotlines)
+      .filter((value): value is string => typeof value === 'string' && value.trim().length > 0);
+  }
+
+  if (Array.isArray((data as { hotlines?: unknown } | undefined)?.hotlines)) {
+    return ((data as { hotlines: unknown[] }).hotlines)
+      .filter((value): value is string => typeof value === 'string' && value.trim().length > 0);
+  }
+
+  if (typeof data === 'string' && /<!doctype html|<html/i.test(data)) {
+    throw new Error('Stringee numbers endpoint returned HTML instead of JSON');
+  }
+
+  throw new Error('Stringee numbers endpoint returned an invalid response');
+}
+
 type ConnectionStatus = 'idle' | 'loading-sdk' | 'fetching-token' | 'connecting' | 'connected' | 'failed';
 type CallStatus = 'idle' | 'dialing' | 'ringing' | 'in_call' | 'ended' | 'failed';
 
@@ -201,7 +219,7 @@ class StringeeService {
     this.update({ loadingHotlines: true });
     try {
       const res = await api.get('/stringee/numbers');
-      this.hotlines = (res.data.data.hotlines as string[]) || [];
+      this.hotlines = extractHotlinesPayload(res.data);
     } catch (err) {
       this.update({ loadingHotlines: false });
       throw extractApiError(err, 'Failed to load Stringee hotlines');

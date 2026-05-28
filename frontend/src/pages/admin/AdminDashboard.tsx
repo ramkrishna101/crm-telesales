@@ -98,7 +98,12 @@ export default function AdminDashboard() {
     const r = computeRange('last_7_days');
     return { preset: 'last_7_days', from: r.from, to: r.to };
   });
+  const [campaignFilter, setCampaignFilter] = useState('');
   const dateParams = { from: dateRange.from, to: dateRange.to };
+  const dashboardParams = {
+    ...dateParams,
+    ...(campaignFilter ? { campaignId: campaignFilter } : {}),
+  };
   const rangeLabel =
     dateRange.preset === 'today' ? 'Today' :
     dateRange.preset === 'yesterday' ? 'Yesterday' :
@@ -113,29 +118,32 @@ export default function AdminDashboard() {
 
   const { data: campaignsData } = useQuery({
     queryKey: ['campaigns', 'all'],
-    queryFn: () => campaignsService.list({ limit: 10 }),
+    queryFn: () => campaignsService.list({ limit: 100 }),
   });
 
   const { data: leadsData } = useQuery({
-    queryKey: ['leads', 'dashboard', dateRange.from, dateRange.to],
-    queryFn: () => leadsService.list({ limit: 1, ...dateParams }),
+    queryKey: ['leads', 'dashboard', dateRange.from, dateRange.to, campaignFilter],
+    queryFn: () => leadsService.list({ limit: 1, ...dashboardParams }),
   });
 
   const { data: callsSummary } = useQuery({
-    queryKey: ['calls', 'summary', dateRange.from, dateRange.to],
-    queryFn: () => callsService.summary(dateParams),
+    queryKey: ['calls', 'summary', dateRange.from, dateRange.to, campaignFilter],
+    queryFn: () => callsService.summary(dashboardParams),
   });
 
   const users = (usersData?.data?.data?.users || []) as Record<string, unknown>[];
   const campaigns = (campaignsData?.data?.data?.campaigns || []) as Record<string, unknown>[];
+  const selectedCampaign = campaigns.find((c) => (c.id as string) === campaignFilter) || null;
+  const campaignScope = selectedCampaign ? [selectedCampaign] : campaigns;
   const totalLeads = (leadsData?.data?.data?.total as number) || 0;
   const callData = callsSummary?.data?.data;
   const agents = users.filter((u) => u.role === 'agent');
-  const activeCampaigns = campaigns.filter((c) => c.status === 'active').length;
+  const activeCampaigns = campaignScope.filter((c) => c.status === 'active').length;
   const totalCalls = callData?.dailyTotals?.reduce((s: number, d: { count: number }) => s + d.count, 0) || 0;
   const connectedCalls = callData?.agentLeaderboard?.reduce((sum: number, agent: { connected: number }) => sum + agent.connected, 0) || 0;
   const callbackCount = callData?.tagBreakdown?.find((tag: { tag: string }) => tag.tag === 'Callback')?.count || 0;
   const connectRate = totalCalls ? Math.round((connectedCalls / totalCalls) * 100) : 0;
+  const scopeLabel = selectedCampaign ? `${selectedCampaign.name as string} in ${rangeLabel.toLowerCase()}` : rangeLabel.toLowerCase();
 
   return (
     <AppLayout>
@@ -149,7 +157,22 @@ export default function AdminDashboard() {
 
           <div className="page-actions">
             <DateRangeFilter value={dateRange} onChange={setDateRange} />
-            <div className="ops-pill">{activeCampaigns} live campaigns</div>
+            <select
+              className="form-input"
+              value={campaignFilter}
+              onChange={(e) => setCampaignFilter(e.target.value)}
+              style={{ minWidth: 220, height: 38 }}
+            >
+              <option value="">All Campaigns</option>
+              {campaigns.map((campaign) => (
+                <option key={campaign.id as string} value={campaign.id as string}>
+                  {campaign.name as string}
+                </option>
+              ))}
+            </select>
+            <div className="ops-pill">
+              {selectedCampaign ? `${selectedCampaign.name as string}` : `${activeCampaigns} live campaigns`}
+            </div>
             <Link to="/admin/campaigns" className="btn btn-primary">
               + New Campaign
             </Link>
@@ -174,7 +197,7 @@ export default function AdminDashboard() {
             <div className="metric-ribbon__item">
               <span className="metric-ribbon__label">Lead inventory</span>
               <strong className="metric-ribbon__value">{totalLeads.toLocaleString()}</strong>
-              <span className="metric-ribbon__sub">created in {rangeLabel.toLowerCase()}</span>
+              <span className="metric-ribbon__sub">created in {scopeLabel}</span>
             </div>
           </div>
         </section>
@@ -187,17 +210,17 @@ export default function AdminDashboard() {
           />
           <StatCard
             icon={<FolderOpen size={22} />} label="Campaigns"
-            value={campaigns.length} sub={`${activeCampaigns} active`}
+            value={selectedCampaign ? 1 : campaigns.length} sub={selectedCampaign ? 'selected campaign' : `${activeCampaigns} active`}
             colour="#22d3ee"
           />
           <StatCard
             icon={<UserCheck size={22} />} label="New Leads"
-            value={totalLeads.toLocaleString()} sub={`created in ${rangeLabel.toLowerCase()}`}
+            value={totalLeads.toLocaleString()} sub={`created in ${scopeLabel}`}
             colour="#22c55e" trend={8}
           />
           <StatCard
             icon={<Phone size={22} />} label={`Calls (${rangeLabel.toLowerCase()})`}
-            value={totalCalls.toLocaleString()} sub="total connected"
+            value={totalCalls.toLocaleString()} sub={selectedCampaign ? 'total calls for selected campaign' : 'total connected'}
             colour="#f59e0b"
           />
         </div>
