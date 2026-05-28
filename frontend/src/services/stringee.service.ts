@@ -218,11 +218,11 @@ class StringeeService {
     return this.hotlines;
   }
 
-  setSelectedHotline(n: string) {
+  setSelectedHotline = (n: string) => {
     if (this.snapshot.hotlines.includes(n)) {
       this.update({ selectedHotline: n });
     }
-  }
+  };
 
   private async fetchAgentToken(): Promise<{ authToken: string; accountId: string | null; email: string }> {
     this.update({ connectionStatus: 'fetching-token' });
@@ -411,14 +411,14 @@ class StringeeService {
     this.update({ lastCall: summary, showOutcome: true });
   }
 
-  dismissOutcome() {
+  dismissOutcome = () => {
     this.update({ showOutcome: false });
-  }
+  };
 
   // Manually open the post-call outcome modal for the currently active lead
   // without an actual call having taken place — useful when the agent dialled
   // from the desk phone or wants to log an outcome before/after the SDK call.
-  openOutcomeForActiveLead() {
+  openOutcomeForActiveLead = () => {
     const { activeLeadId, activeLeadName, activePhone, selectedHotline, lastCall } = this.snapshot;
     if (!activeLeadId) return;
     // Reuse the most recent in-flight summary if we have one for the same lead,
@@ -439,14 +439,14 @@ class StringeeService {
           telephonyRef: null,
         };
     this.update({ lastCall: summary, showOutcome: true });
-  }
+  };
 
   // Opens the dialer popup for a lead, loads phone + hotlines, and kicks off
   // WebSocket authentication in the background so that by the time the agent
   // picks a From Number and clicks the green Call button, the WS is usually
   // ready. If the WS is broken or never connected, placeCall() will (re)auth
   // on demand.
-  async startCall(leadId: string, fallbackName?: string): Promise<void> {
+  startCall = async (leadId: string, fallbackName?: string): Promise<void> => {
     if (
       this.snapshot.callStatus === 'dialing' ||
       this.snapshot.callStatus === 'ringing' ||
@@ -497,13 +497,13 @@ class StringeeService {
       });
       throw error;
     }
-  }
+  };
 
   // Commits the call using the agent-selected hotline. If the WebSocket is
   // not connected (broken / first call), we (re)authenticate transparently
   // before dialing. Falls back through remaining hotlines if Stringee
   // rejects the chosen one (CALL_NOT_ALLOWED_BY_YOUR_SERVER).
-  async placeCall(): Promise<void> {
+  placeCall = async (): Promise<void> => {
     const { activeLeadId, activePhone, selectedHotline, hotlines } = this.snapshot;
     if (!activeLeadId || !activePhone) throw new Error('No lead selected');
 
@@ -548,7 +548,7 @@ class StringeeService {
       });
       throw error;
     }
-  }
+  };
 
   // Normalise customer phone to E.164 without the leading `+`, as Stringee
   // expects. A bare 10-digit Indian mobile (starts 6–9) is prefixed with `91`.
@@ -615,7 +615,7 @@ class StringeeService {
     });
   }
 
-  async hangup(): Promise<void> {
+  hangup = async (): Promise<void> => {
     if (this.call) {
       try {
         this.call.hangup(() => {});
@@ -626,9 +626,9 @@ class StringeeService {
     this.clearTimer();
     this.detachRemoteAudio();
     this.update({ callStatus: 'ended', canMute: false });
-  }
+  };
 
-  toggleMute() {
+  toggleMute = () => {
     if (!this.call) return;
     const next = !this.snapshot.muted;
     try {
@@ -637,9 +637,9 @@ class StringeeService {
     } catch (err) {
       this.update({ error: err instanceof Error ? err.message : 'Mute failed' });
     }
-  }
+  };
 
-  dismiss() {
+  dismiss = () => {
     this.clearTimer();
     if (
       this.snapshot.callStatus === 'dialing' ||
@@ -660,11 +660,11 @@ class StringeeService {
       muted: false,
       canMute: false,
     });
-  }
+  };
 
-  clearError() {
+  clearError = () => {
     this.update({ error: null });
-  }
+  };
 }
 
 export const stringeeService = new StringeeService();
