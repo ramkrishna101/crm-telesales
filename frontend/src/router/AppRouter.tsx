@@ -1,6 +1,7 @@
 import { Routes, Route, Navigate } from 'react-router-dom';
 import { ProtectedRoute, RoleRoute } from './guards';
 import { useAuthStore } from '../store/authStore';
+import { AgentViewportBoundary, AuthViewportBoundary } from '../components/layout/ViewportBoundaries';
 import LoginPage from '../pages/auth/LoginPage';
 import UnauthorizedPage from '../pages/auth/UnauthorizedPage';
 
@@ -33,6 +34,8 @@ import SupervisorDashboard from '../pages/supervisor/SupervisorDashboard';
 import AgentDashboard from '../pages/agent/AgentDashboard';
 import AgentLeadsPage from '../pages/agent/AgentLeadsPage';
 import AgentFollowUpsPage from '../pages/agent/AgentFollowUpsPage';
+import AgentCallsPage from '../pages/agent/AgentCallsPage';
+import AgentProfilePage from '../pages/agent/AgentProfilePage';
 
 export default function AppRouter() {
   const { _hasHydrated } = useAuthStore();
@@ -48,7 +51,7 @@ export default function AppRouter() {
   return (
     <Routes>
       {/* Public */}
-      <Route path="/login" element={<LoginPage />} />
+      <Route path="/login" element={<AuthViewportBoundary desktop={<LoginPage />} />} />
       <Route path="/unauthorized" element={<UnauthorizedPage />} />
 
       {/* ── Admin ────────────────────────────────────────────────────── */}
@@ -76,10 +79,12 @@ export default function AppRouter() {
 
       {/* ── Agent ────────────────────────────────────────────────────── */}
       <Route element={<RoleRoute allowedRoles={['agent']} />}>
-        <Route path="/agent" element={<AgentDashboard />} />
-        <Route path="/agent/leads" element={<AgentLeadsPage />} />
-        <Route path="/agent/follow-ups" element={<AgentFollowUpsPage />} />
-        <Route path="/agent/*" element={<AgentDashboard />} />
+        <Route path="/agent" element={<AgentViewportBoundary desktop={<AgentDashboard />} />} />
+        <Route path="/agent/leads" element={<AgentViewportBoundary desktop={<AgentLeadsPage />} />} />
+        <Route path="/agent/follow-ups" element={<AgentViewportBoundary desktop={<AgentFollowUpsPage />} />} />
+        <Route path="/agent/calls" element={<AgentViewportBoundary desktop={<AgentCallsPage />} />} />
+        <Route path="/agent/profile" element={<AgentViewportBoundary desktop={<AgentProfilePage />} />} />
+        <Route path="/agent/*" element={<AgentViewportBoundary desktop={<AgentDashboard />} />} />
       </Route>
 
       {/* Root redirect */}

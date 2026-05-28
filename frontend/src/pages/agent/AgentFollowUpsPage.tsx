@@ -2,10 +2,12 @@ import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { followUpsService } from '../../services/crm.service';
 import AppLayout from '../../components/layout/AppLayout';
+import { useIsMobile } from '../../hooks/useIsMobile';
 import { Calendar, PhoneCall, RefreshCw, CheckCircle, Clock } from 'lucide-react';
 import toast from 'react-hot-toast';
 
 export default function AgentFollowUpsPage() {
+  const isMobile = useIsMobile();
   const { data: followUpsData, isLoading, refetch } = useQuery({
     queryKey: ['agent-follow-ups'],
     queryFn: () => followUpsService.list({ status: 'pending' }),
@@ -22,6 +24,77 @@ export default function AgentFollowUpsPage() {
       toast.error('Failed to update follow-up');
     }
   };
+
+  if (isMobile) {
+    return (
+      <AppLayout>
+        <div className="agent-mobile-stack">
+          <section className="agent-mobile-summary-card">
+            <div className="section-eyebrow">Callback queue</div>
+            <h1 className="agent-mobile-section-title">My Follow-ups</h1>
+            <p className="page-subtitle" style={{ marginTop: 6 }}>Scheduled calls and reminders</p>
+            <div className="agent-mobile-inline-actions">
+              <button className="btn btn-secondary" onClick={() => refetch()} disabled={isLoading}>
+                <RefreshCw size={16} className={isLoading ? 'spin' : ''} /> Refresh
+              </button>
+              <div className="agent-mobile-stat-tile" style={{ display: 'flex', flexDirection: 'column', justifyContent: 'center' }}>
+                <div className="agent-mobile-stat-value">{followUps.length}</div>
+                <div className="agent-mobile-stat-label">Pending</div>
+              </div>
+            </div>
+          </section>
+
+          <section className="card card--mobile">
+            {isLoading && (
+              <div className="empty-state">
+                <RefreshCw className="spin" size={24} />
+                <p>Loading follow-ups...</p>
+              </div>
+            )}
+
+            {!isLoading && followUps.length === 0 && (
+              <div className="empty-state">
+                <Calendar size={40} style={{ opacity: 0.2, marginBottom: 16 }} />
+                <p>You have no pending follow-ups scheduled.</p>
+              </div>
+            )}
+
+            {!isLoading && followUps.length > 0 && (
+              <div className="agent-mobile-list">
+                {followUps.map((f: any) => (
+                  <div key={f.id} className="agent-mobile-followup-card">
+                    <div className="agent-mobile-list-title">{f.lead?.name || 'Unknown Lead'}</div>
+                    <div className="agent-mobile-list-subtitle">
+                      {f.lead?.phone ? f.lead.phone.slice(0, -4).replace(/[0-9]/g, 'X') + f.lead.phone.slice(-4) : ''}
+                    </div>
+                    <div className="agent-mobile-followup-time">
+                      <Clock size={14} />
+                      <span>{new Date(f.scheduledAt).toLocaleString()}</span>
+                    </div>
+                    <div className="agent-mobile-muted">{f.notes || 'No notes added'}</div>
+                    <div className="agent-mobile-inline-actions">
+                      <button
+                        className="btn btn-primary"
+                        onClick={() => toast.success('Initiating call...')}
+                      >
+                        <PhoneCall size={14} /> Call
+                      </button>
+                      <button
+                        className="btn btn-secondary"
+                        onClick={() => handleComplete(f.id)}
+                      >
+                        <CheckCircle size={14} /> Done
+                      </button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </section>
+        </div>
+      </AppLayout>
+    );
+  }
 
   return (
     <AppLayout>

@@ -16,6 +16,7 @@ interface User {
   stringeeEmail?: string | null;
   stringeeAccountId?: string | null;
   role: UserRole; status: UserStatus; teamId: string | null;
+  branch?: { id: string; name: string } | null;
   team?: { id: string; name: string } | null; createdAt: string;
 }
 interface Team { id: string; name: string; }
@@ -411,6 +412,7 @@ export default function UsersPage() {
           <div className="table-header">
             <div className="table-col" style={{ flex: 2 }}>User</div>
             <div className="table-col">Role</div>
+            <div className="table-col">Branch</div>
             <div className="table-col">Team</div>
             <div className="table-col">Status</div>
             <div className="table-col">Joined</div>
@@ -431,6 +433,7 @@ export default function UsersPage() {
               <div className="table-cell">
                 <span className="badge" style={{ background: roleColour[u.role] + '22', color: roleColour[u.role] }}>{roleLabel[u.role]}</span>
               </div>
+              <div className="table-cell" style={{ color: 'var(--text-secondary)' }}>{u.branch?.name || '—'}</div>
               <div className="table-cell" style={{ color: 'var(--text-secondary)' }}>{u.team?.name || '—'}</div>
               <div className="table-cell">
                 <span className="badge" style={statusTone[u.status]}>

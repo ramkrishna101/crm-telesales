@@ -18,8 +18,8 @@ export function useSocket() {
       return;
     }
 
-    const socketUrl = import.meta.env.VITE_API_URL?.replace('/api', '') || (import.meta.env.PROD ? undefined : 'http://localhost:4000');
-    socket = io(socketUrl as string, {
+    const socketUrl = import.meta.env.VITE_SOCKET_URL || import.meta.env.VITE_API_URL?.replace('/api', '');
+    socket = io(socketUrl, {
       auth: { token: accessToken },
       transports: ['websocket'],
       reconnectionAttempts: 5,

@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'reac
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import toast from 'react-hot-toast';
 import { Check, ChevronDown, Phone, X } from 'lucide-react';
+import { useIsMobile } from '../../hooks/useIsMobile';
 import { stringeeService } from '../../services/stringee.service';
 import { tagsService, callsService, followUpsService, leadsService } from '../../services/crm.service';
 
@@ -54,6 +55,7 @@ function formatShort(iso: string) {
 
 export default function PostCallOutcomeModal() {
   const state = useSyncExternalStore(stringeeService.subscribe, stringeeService.getSnapshot);
+  const isMobile = useIsMobile();
   const qc = useQueryClient();
 
   const visible = state.showOutcome && !!state.lastCall;
@@ -172,29 +174,143 @@ export default function PostCallOutcomeModal() {
   if (!visible || !state.lastCall) return null;
   const lc = state.lastCall;
 
+  const callInformationSection = (
+    <Section
+      title="Call Information"
+      mobile={isMobile}
+      sectionClassName={isMobile ? 'agent-mobile-outcome-sheet__section--summary' : undefined}
+      right={(() => {
+        const s = STATUS_LABELS[liveLead?.status] || { label: liveLead?.status || '—', bg: '#f1f5f9', fg: '#475569' };
+        return (
+          <span className={isMobile ? 'agent-mobile-outcome-sheet__status-row' : undefined} style={{ fontSize: 13, color: '#475569', display: 'inline-flex', alignItems: 'center', flexWrap: 'wrap', gap: 6, justifyContent: isMobile ? 'flex-start' : 'flex-end' }}>
+            Followup Status :{' '}
+            <span className={isMobile ? 'agent-mobile-outcome-sheet__status-pill' : undefined} style={{
+              display: 'inline-block', padding: '3px 12px', borderRadius: 999,
+              background: s.bg, color: s.fg,
+              fontWeight: 600, fontSize: 12,
+            }}>
+              {s.label}
+            </span>
+          </span>
+        );
+      })()}
+    >
+      <Grid mobile={isMobile} mobileColumns={2}>
+        <Field label="Call Start Time" mobile={isMobile} span={2}>
+          <ReadOnly value={formatDateTime(lc.startedAt)} mobile={isMobile} />
+        </Field>
+        <Field label="Call Duration" mobile={isMobile}>
+          <div className={isMobile ? 'agent-mobile-outcome-sheet__duration' : undefined} style={{ display: 'flex', gap: 8 }}>
+            <ReadOnly value={`${pad(minutes)} min`} mobile={isMobile} />
+            <ReadOnly value={`${pad(seconds)} sec`} mobile={isMobile} />
+          </div>
+        </Field>
+        <Field label="Last Call Result" mobile={isMobile}>
+          <ReadOnly value={previousDisposition || (lc.answered ? 'Answered' : 'No Answer')} mobile={isMobile} />
+        </Field>
+        <Field label="Last Call Made On" mobile={isMobile} span={2}>
+          <ReadOnly value={formatShort(lc.endedAt)} mobile={isMobile} />
+        </Field>
+        <Field label="Call End Reason" span={2} mobile={isMobile}>
+          <ReadOnly value={`${lc.answered ? 'USER_END_CALL' : 'NO_ANSWER'} | ${lc.endReason}`} mobile={isMobile} />
+        </Field>
+        <Field label="Last Call Description" span={2} mobile={isMobile}>
+          <ReadOnly value={previousNotes || (lc.answered ? 'Answered' : 'Not answered')} mobile={isMobile} />
+        </Field>
+      </Grid>
+    </Section>
+  );
+
+  const outcomeSection = (
+    <Section title="Outcome Of Outgoing Call" mobile={isMobile}>
+      <Grid mobile={isMobile}>
+        <Field label="Call Result" required mobile={isMobile}>
+          <Dropdown
+            value={dispositionTag}
+            onChange={setDispositionTag}
+            options={tags.map((t) => ({ value: t.name, label: t.name, colour: t.colour }))}
+            placeholder="Select an option"
+            mobile={isMobile}
+          />
+        </Field>
+        <Field label="Language" mobile={isMobile}>
+          <Dropdown
+            value={language}
+            onChange={setLanguage}
+            options={LANGUAGE_OPTIONS.map((l) => ({ value: l, label: l }))}
+            placeholder="Select an option"
+            mobile={isMobile}
+          />
+        </Field>
+        <Field label="Update Followup Status" mobile={isMobile}>
+          <Dropdown
+            value={followupStatus}
+            onChange={setFollowupStatus}
+            options={FOLLOWUP_STATUS_OPTIONS.map((s) => ({ value: s.value, label: s.label }))}
+            placeholder="Keep current"
+            mobile={isMobile}
+          />
+        </Field>
+        <Field label="Next Call Schedule Date" mobile={isMobile}>
+          <div className={isMobile ? 'agent-mobile-outcome-sheet__schedule' : undefined} style={{ display: 'flex', flexDirection: isMobile ? 'column' : 'row', gap: 8 }}>
+            <input
+              type="date"
+              value={followupDate}
+              onChange={(e) => setFollowupDate(e.target.value)}
+              className={isMobile ? 'agent-mobile-outcome-sheet__input' : undefined}
+              style={{ ...inputStyle, flex: 1 }}
+            />
+            <input
+              type="time"
+              value={followupTime}
+              onChange={(e) => setFollowupTime(e.target.value)}
+              className={isMobile ? 'agent-mobile-outcome-sheet__input' : undefined}
+              style={{ ...inputStyle, width: isMobile ? '100%' : 110 }}
+            />
+          </div>
+        </Field>
+        <Field label="Description" span={2} mobile={isMobile}>
+          <textarea
+            value={description}
+            onChange={(e) => setDescription(e.target.value)}
+            placeholder="Enter description..."
+            rows={3}
+            className={isMobile ? 'agent-mobile-outcome-sheet__input agent-mobile-outcome-sheet__textarea' : undefined}
+            style={{ ...inputStyle, resize: 'vertical', minHeight: 70 }}
+          />
+        </Field>
+      </Grid>
+    </Section>
+  );
+
   return (
     <div
+      className={isMobile ? 'agent-mobile-sheet-backdrop' : undefined}
       style={{
         position: 'fixed', inset: 0, background: 'rgba(15,23,42,0.45)',
-        display: 'flex', alignItems: 'center', justifyContent: 'center',
-        zIndex: 1300, padding: 20,
+        display: 'flex', alignItems: isMobile ? 'flex-end' : 'center', justifyContent: 'center',
+        zIndex: 1300, padding: isMobile ? 0 : 20,
       }}
       onClick={() => stringeeService.dismissOutcome()}
     >
       <div
         onClick={(e) => e.stopPropagation()}
+        className={isMobile ? 'agent-mobile-outcome-sheet' : undefined}
         style={{
-          width: 'min(960px, 100%)', maxHeight: '92vh', overflowY: 'auto',
-          background: '#fff', borderRadius: 14,
+          width: isMobile ? '100%' : 'min(960px, 100%)', maxHeight: isMobile ? '94vh' : '92vh', overflowY: 'auto',
+          background: '#fff', borderRadius: isMobile ? '28px 28px 0 0' : 14,
           boxShadow: '0 30px 80px rgba(0,0,0,0.25)',
           fontFamily: 'system-ui, -apple-system, sans-serif',
         }}
       >
         {/* Header */}
-        <div style={{ padding: '16px 24px', borderBottom: '1px solid #f1f5f9', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+        <div className={isMobile ? 'agent-mobile-outcome-sheet__header' : undefined} style={{ padding: isMobile ? '12px 16px 14px' : '16px 24px', borderBottom: '1px solid #f1f5f9', display: 'flex', justifyContent: 'space-between', alignItems: isMobile ? 'flex-start' : 'center', gap: 12 }}>
           <div>
+            {isMobile && (
+              <div className="agent-mobile-outcome-sheet__handle" style={{ width: 42, height: 4, borderRadius: 999, background: '#dbe3ef', margin: '0 auto 12px' }} />
+            )}
             <div style={{ fontSize: 11, textTransform: 'uppercase', color: '#94a3b8', fontWeight: 600, letterSpacing: '0.06em' }}>Post Call</div>
-            <div style={{ fontSize: 18, fontWeight: 700, color: '#0f172a' }}>{lc.leadName || 'Lead'} · {lc.phone}</div>
+            <div style={{ fontSize: isMobile ? 16 : 18, fontWeight: 700, color: '#0f172a', lineHeight: 1.3 }}>{lc.leadName || 'Lead'} · {lc.phone}</div>
           </div>
           <button
             onClick={() => stringeeService.dismissOutcome()}
@@ -204,114 +320,20 @@ export default function PostCallOutcomeModal() {
           </button>
         </div>
 
-        {/* Call Information section */}
-        <Section
-          title="Call Information"
-          right={(() => {
-            const s = STATUS_LABELS[liveLead?.status] || { label: liveLead?.status || '—', bg: '#f1f5f9', fg: '#475569' };
-            return (
-              <span style={{ fontSize: 13, color: '#475569' }}>
-                Followup Status :{' '}
-                <span style={{
-                  display: 'inline-block', padding: '3px 12px', borderRadius: 999,
-                  background: s.bg, color: s.fg,
-                  fontWeight: 600, fontSize: 12,
-                }}>
-                  {s.label}
-                </span>
-              </span>
-            );
-          })()}
-        >
-          <Grid>
-            <Field label="Call Start Time">
-              <ReadOnly value={formatDateTime(lc.startedAt)} />
-            </Field>
-            <Field label="Call Duration">
-              <div style={{ display: 'flex', gap: 8 }}>
-                <ReadOnly value={`${pad(minutes)} min`} />
-                <ReadOnly value={`${pad(seconds)} sec`} />
-              </div>
-            </Field>
-            <Field label="Last Call Made On">
-              <ReadOnly value={formatShort(lc.endedAt)} />
-            </Field>
-            <Field label="Last Call Result">
-              <ReadOnly value={previousDisposition || (lc.answered ? 'Answered' : 'No Answer')} />
-            </Field>
-            <Field label="Call End Reason" span={2}>
-              <ReadOnly value={`${lc.answered ? 'USER_END_CALL' : 'NO_ANSWER'} | ${lc.endReason}`} />
-            </Field>
-            <Field label="Last Call Description" span={2}>
-              <ReadOnly value={previousNotes || (lc.answered ? 'Answered' : 'Not answered')} />
-            </Field>
-          </Grid>
-        </Section>
-
-        {/* Outcome section */}
-        <Section title="Outcome Of Outgoing Call">
-          <Grid>
-            <Field label="Call Result" required>
-              <Dropdown
-                value={dispositionTag}
-                onChange={setDispositionTag}
-                options={tags.map((t) => ({ value: t.name, label: t.name, colour: t.colour }))}
-                placeholder="Select an option"
-              />
-            </Field>
-            <Field label="Language">
-              <Dropdown
-                value={language}
-                onChange={setLanguage}
-                options={LANGUAGE_OPTIONS.map((l) => ({ value: l, label: l }))}
-                placeholder="Select an option"
-              />
-            </Field>
-            <Field label="Update Followup Status">
-              <Dropdown
-                value={followupStatus}
-                onChange={setFollowupStatus}
-                options={FOLLOWUP_STATUS_OPTIONS.map((s) => ({ value: s.value, label: s.label }))}
-                placeholder="Keep current"
-              />
-            </Field>
-            <Field label="Next Call Schedule Date">
-              <div style={{ display: 'flex', gap: 8 }}>
-                <input
-                  type="date"
-                  value={followupDate}
-                  onChange={(e) => setFollowupDate(e.target.value)}
-                  style={{ ...inputStyle, flex: 1 }}
-                />
-                <input
-                  type="time"
-                  value={followupTime}
-                  onChange={(e) => setFollowupTime(e.target.value)}
-                  style={{ ...inputStyle, width: 110 }}
-                />
-              </div>
-            </Field>
-            <Field label="Description" span={2}>
-              <textarea
-                value={description}
-                onChange={(e) => setDescription(e.target.value)}
-                placeholder="Enter description..."
-                rows={3}
-                style={{ ...inputStyle, resize: 'vertical', minHeight: 70 }}
-              />
-            </Field>
-          </Grid>
-        </Section>
+        {isMobile ? outcomeSection : callInformationSection}
+        {isMobile ? callInformationSection : outcomeSection}
 
         {/* Footer */}
-        <div style={{ padding: '16px 24px', borderTop: '1px solid #f1f5f9', display: 'flex', justifyContent: 'flex-end', gap: 10 }}>
+        <div className={isMobile ? 'agent-mobile-outcome-sheet__footer' : undefined} style={{ padding: isMobile ? '14px 16px calc(14px + env(safe-area-inset-bottom))' : '16px 24px', borderTop: '1px solid #f1f5f9', display: 'flex', flexDirection: isMobile ? 'column-reverse' : 'row', justifyContent: 'flex-end', gap: 10 }}>
           <button
             onClick={handleRedial}
+            className={isMobile ? 'agent-mobile-outcome-sheet__secondary' : undefined}
             style={{
-              padding: '8px 18px', fontSize: 14, fontWeight: 600,
+              padding: isMobile ? '12px 18px' : '8px 18px', fontSize: 14, fontWeight: 600,
               background: '#e2e8f0', color: '#334155',
               border: 'none', borderRadius: 8, cursor: 'pointer',
               display: 'inline-flex', alignItems: 'center', gap: 6,
+              justifyContent: 'center',
             }}
           >
             <Phone size={14} /> Redial
@@ -319,11 +341,13 @@ export default function PostCallOutcomeModal() {
           <button
             onClick={() => logMutation.mutate()}
             disabled={logMutation.isPending || !dispositionTag}
+            className={isMobile ? 'agent-mobile-outcome-sheet__primary' : undefined}
             style={{
-              padding: '8px 22px', fontSize: 14, fontWeight: 600,
+              padding: isMobile ? '12px 22px' : '8px 22px', fontSize: 14, fontWeight: 600,
               background: dispositionTag ? '#3b82f6' : '#94a3b8',
               color: '#fff', border: 'none', borderRadius: 8,
               cursor: dispositionTag && !logMutation.isPending ? 'pointer' : 'not-allowed',
+              width: isMobile ? '100%' : 'auto',
             }}
           >
             {logMutation.isPending ? 'Saving…' : 'Log'}
@@ -342,25 +366,25 @@ const inputStyle: React.CSSProperties = {
   color: '#0f172a',
 };
 
-function Section({ title, right, children }: { title: string; right?: React.ReactNode; children: React.ReactNode }) {
+function Section({ title, right, children, mobile, sectionClassName }: { title: string; right?: React.ReactNode; children: React.ReactNode; mobile?: boolean; sectionClassName?: string }) {
   return (
-    <div style={{ borderBottom: '1px solid #f1f5f9' }}>
+    <div className={[mobile ? 'agent-mobile-outcome-sheet__section' : '', sectionClassName || ''].filter(Boolean).join(' ')} style={{ borderBottom: '1px solid #f1f5f9' }}>
       <div style={{
-        padding: '12px 24px', display: 'flex', justifyContent: 'space-between', alignItems: 'center',
-        background: '#f8fafc',
+        padding: mobile ? '12px 16px' : '12px 24px', display: 'flex', flexDirection: mobile ? 'column' : 'row', justifyContent: 'space-between', alignItems: mobile ? 'flex-start' : 'center', gap: mobile ? 8 : 12,
+        background: mobile ? 'transparent' : '#f8fafc',
       }}>
-        <div style={{ fontSize: 14, fontWeight: 700, color: '#0f172a' }}>▼ {title}</div>
+        <div style={{ fontSize: 14, fontWeight: 700, color: '#0f172a' }}>{mobile ? title : `▼ ${title}`}</div>
         {right}
       </div>
-      <div style={{ padding: '18px 24px' }}>{children}</div>
+      <div style={{ padding: mobile ? '16px' : '18px 24px' }}>{children}</div>
     </div>
   );
 }
 
-function Grid({ children }: { children: React.ReactNode }) {
+function Grid({ children, mobile, mobileColumns = 1 }: { children: React.ReactNode; mobile?: boolean; mobileColumns?: 1 | 2 }) {
   return (
-    <div style={{
-      display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)',
+    <div className={mobile ? 'agent-mobile-outcome-sheet__grid' : undefined} style={{
+      display: 'grid', gridTemplateColumns: mobile ? `repeat(${mobileColumns}, minmax(0, 1fr))` : 'repeat(2, 1fr)',
       gap: '14px 32px',
     }}>
       {children}
@@ -368,10 +392,11 @@ function Grid({ children }: { children: React.ReactNode }) {
   );
 }
 
-function Field({ label, required, span, children }: { label: string; required?: boolean; span?: number; children: React.ReactNode }) {
+function Field({ label, required, span, children, mobile }: { label: string; required?: boolean; span?: number; children: React.ReactNode; mobile?: boolean }) {
+  const gridColumn = span === 2 ? 'span 2' : 'span 1';
   return (
-    <div style={{ gridColumn: span === 2 ? 'span 2' : 'span 1' }}>
-      <label style={{
+    <div className={mobile ? 'agent-mobile-outcome-sheet__field' : undefined} style={{ gridColumn: span ? gridColumn : 'span 1' }}>
+      <label className={mobile ? 'agent-mobile-outcome-sheet__label' : undefined} style={{
         display: 'block', fontSize: 12, fontWeight: 600, color: '#475569', marginBottom: 5,
       }}>
         {label}{required && <span style={{ color: '#ef4444' }}>*</span>}
@@ -381,9 +406,9 @@ function Field({ label, required, span, children }: { label: string; required?: 
   );
 }
 
-function ReadOnly({ value }: { value: string }) {
+function ReadOnly({ value, mobile }: { value: string; mobile?: boolean }) {
   return (
-    <div style={{
+    <div className={mobile ? 'agent-mobile-outcome-sheet__readonly' : undefined} style={{
       padding: '8px 10px', fontSize: 13,
       background: '#f1f5f9', border: '1px solid #e2e8f0',
       borderRadius: 6, color: '#0f172a',
@@ -402,12 +427,13 @@ interface DropdownOption {
 }
 
 function Dropdown({
-  value, onChange, options, placeholder,
+  value, onChange, options, placeholder, mobile,
 }: {
   value: string;
   onChange: (v: string) => void;
   options: DropdownOption[];
   placeholder: string;
+  mobile?: boolean;
 }) {
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
@@ -433,6 +459,7 @@ function Dropdown({
       <button
         type="button"
         onClick={() => setOpen((o) => !o)}
+        className={mobile ? 'agent-mobile-outcome-sheet__select' : undefined}
         style={{
           width: '100%', padding: '8px 10px', fontSize: 13,
           border: `1px solid ${open ? '#3b82f6' : '#cbd5e1'}`,
@@ -454,6 +481,7 @@ function Dropdown({
       </button>
       {open && (
         <div
+          className={mobile ? 'agent-mobile-outcome-sheet__menu' : undefined}
           style={{
             position: 'absolute', top: 'calc(100% + 4px)', left: 0, right: 0,
             maxHeight: 240, overflowY: 'auto',

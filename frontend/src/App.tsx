@@ -4,6 +4,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { Toaster } from 'react-hot-toast';
 import AppRouter from './router/AppRouter';
 import { useSocket } from './hooks/useSocket';
+import { useIsMobile } from './hooks/useIsMobile';
 import { useAuthStore } from './store/authStore';
 import StringeeCallPopup from './components/calls/StringeeCallPopup';
 import PostCallOutcomeModal from './components/calls/PostCallOutcomeModal';
@@ -35,14 +36,18 @@ function SessionCleanup() {
 }
 
 function App() {
+  const isMobile = useIsMobile();
+
   return (
     <BrowserRouter>
       <QueryClientProvider client={queryClient}>
         <SocketBootstrap />
         <SessionCleanup />
         <AppRouter />
-        <StringeeCallPopup />
-        <PostCallOutcomeModal />
+        <div data-agent-viewport={isMobile ? 'mobile' : 'desktop'}>
+          <StringeeCallPopup />
+          <PostCallOutcomeModal />
+        </div>
         <Toaster
           position="top-right"
           toastOptions={{

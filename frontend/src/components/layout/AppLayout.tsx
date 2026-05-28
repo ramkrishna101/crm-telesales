@@ -1,11 +1,12 @@
 import { NavLink, useLocation, useNavigate } from 'react-router-dom';
+import { useIsMobile } from '../../hooks/useIsMobile';
 import { useAuthStore } from '../../store/authStore';
 import { authService, agentService } from '../../services/crm.service';
 import toast from 'react-hot-toast';
 import {
   LayoutDashboard, Users, Building2, PhoneCall,
   BarChart3, LogOut, ChevronRight, Bell,
-  UserCheck, FolderOpen, ListChecks, Tag
+  UserCheck, FolderOpen, ListChecks, Tag, UserCircle2
 } from 'lucide-react';
 
 interface NavItem { icon: React.ReactNode; label: string; to: string; }
@@ -48,6 +49,14 @@ const agentNav: NavItem[] = [
   { icon: <PhoneCall size={18} />, label: 'Call History', to: '/agent/calls' },
 ];
 
+const agentMobileNav: NavItem[] = [
+  { icon: <LayoutDashboard size={18} />, label: 'Dashboard', to: '/agent' },
+  { icon: <ListChecks size={18} />, label: 'Follow-ups', to: '/agent/follow-ups' },
+  { icon: <Users size={18} />, label: 'My Leads', to: '/agent/leads' },
+  { icon: <PhoneCall size={18} />, label: 'Calls', to: '/agent/calls' },
+  { icon: <UserCircle2 size={18} />, label: 'Profile', to: '/agent/profile' },
+];
+
 const roleNavs = {
   super_admin: superAdminNav,
   branch_admin: branchAdminNav,
@@ -63,11 +72,14 @@ const roleTitles = {
 
 export default function AppLayout({ children }: { children: React.ReactNode }) {
   const { user, logout, refreshToken, updateUser } = useAuthStore();
+  const isMobile = useIsMobile();
   const navigate = useNavigate();
   const location = useLocation();
   const role = user?.role || 'agent';
   const navItems = roleNavs[role] || agentNav;
-  const activeItem = [...navItems]
+  const mobileNavItems = role === 'agent' ? agentMobileNav : navItems;
+  const activeNavItems = role === 'agent' && isMobile ? mobileNavItems : navItems;
+  const activeItem = [...activeNavItems]
     .sort((left, right) => right.to.length - left.to.length)
     .find((item) => location.pathname === item.to || location.pathname.startsWith(`${item.to}/`));
   const todayLabel = new Intl.DateTimeFormat('en-US', {
@@ -90,6 +102,42 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
     navigate('/login');
     toast.success('Logged out');
   };
+
+  if (role === 'agent' && isMobile) {
+    return (
+      <div className="agent-mobile-app">
+        <div className="agent-mobile-topbar">
+          <div>
+            <div className="agent-mobile-topbar__eyebrow">Agent Workspace</div>
+            <div className="agent-mobile-topbar__title">{activeItem?.label || 'Dashboard'}</div>
+          </div>
+          <div className="agent-mobile-topbar__meta">
+            <span className={`ops-pill ${user?.status === 'on_break' ? 'ops-pill--warning' : 'ops-pill--success'}`}>
+              {statusLabel}
+            </span>
+          </div>
+        </div>
+
+        <div className="agent-mobile-content">{children}</div>
+
+        <nav className="agent-mobile-dock" aria-label="Agent navigation">
+          {mobileNavItems.map((item) => (
+            <NavLink
+              key={item.to}
+              to={item.to}
+              end={item.to.split('/').length <= 2}
+              className={({ isActive }) =>
+                `agent-mobile-dock__item ${item.label === 'My Leads' ? 'agent-mobile-dock__item--primary' : ''} ${isActive ? 'agent-mobile-dock__item--active' : ''}`
+              }
+            >
+              <span className="agent-mobile-dock__icon">{item.icon}</span>
+              <span className="sr-only">{item.label}</span>
+            </NavLink>
+          ))}
+        </nav>
+      </div>
+    );
+  }
 
   return (
     <div className="app-layout">

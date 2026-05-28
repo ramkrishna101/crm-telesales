@@ -2,6 +2,7 @@ import { useState, useEffect, useRef } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { agentService, callsService, tagsService, followUpsService } from '../../services/crm.service';
 import AppLayout from '../../components/layout/AppLayout';
+import { useIsMobile } from '../../hooks/useIsMobile';
 import toast from 'react-hot-toast';
 import {
   Phone, PhoneOff, Coffee, Clock, CheckCircle,
@@ -201,6 +202,7 @@ function DispositionLeadsModal({
 
 export default function AgentWorkspace() {
   const qc = useQueryClient();
+  const isMobile = useIsMobile();
   const [activeLead, setActiveLead] = useState<Lead | null>(null);
   const [selectedTagForList, setSelectedTagForList] = useState<string | null>(null);
   const [realPhone, setRealPhone] = useState<string | null>(null);
@@ -294,6 +296,192 @@ export default function AgentWorkspace() {
       }
     }
   };
+
+  if (isMobile) {
+    return (
+      <AppLayout>
+        <div className="agent-mobile-stack">
+          <section className="agent-mobile-summary-card">
+            <div>
+              <div className="section-eyebrow">Today summary</div>
+              <h1 className="agent-mobile-section-title">Dashboard</h1>
+              <p className="page-subtitle" style={{ marginTop: 6 }}>
+                {stats?.isOnBreak
+                  ? <span style={{ color: '#f59e0b' }}>On Break - <BreakTimer startedAt={stats.breakStartedAt} /></span>
+                  : <span style={{ color: '#22c55e' }}>Ready for next lead</span>}
+              </p>
+            </div>
+
+            <div className="agent-mobile-stats-grid">
+              {[
+                { label: 'My Leads', value: stats?.totalLeads || 0 },
+                { label: 'Pending', value: stats?.pendingLeads || 0 },
+                { label: 'Calls', value: stats?.callsToday || 0 },
+                { label: 'Break', value: `${stats?.breakMinutesToday || 0}m` },
+              ].map(({ label, value }) => (
+                <div key={label} className="agent-mobile-stat-tile">
+                  <div className="agent-mobile-stat-value">{value}</div>
+                  <div className="agent-mobile-stat-label">{label}</div>
+                </div>
+              ))}
+            </div>
+
+            <div className="agent-mobile-inline-actions">
+              {stats?.isOnBreak ? (
+                <button className="btn btn-primary" onClick={() => breakEndMutation.mutate()}>
+                  <Coffee size={16} /> End Break
+                </button>
+              ) : (
+                <button className="btn btn-secondary" onClick={() => breakStartMutation.mutate()}>
+                  <Coffee size={16} /> Take Break
+                </button>
+              )}
+              <button className="btn btn-secondary" onClick={() => { refetchDash(); refetchNext(); }}>
+                <RefreshCw size={14} /> Refresh
+              </button>
+            </div>
+          </section>
+
+          <section className="card card--mobile">
+            <div className="card-header card-header--dense">
+              <div>
+                <div className="card-kicker">Lead queue</div>
+                <h2 className="card-title">{nextLeadResp?.type === 'follow_up' ? 'Overdue Follow-up' : 'Next Lead'}</h2>
+              </div>
+              <button className="btn-icon" onClick={() => refetchNext()}><RefreshCw size={15} /></button>
+            </div>
+
+            {currentLead ? (
+              showDisposition ? (
+                <DispositionPanel
+                  lead={currentLead}
+                  tags={tags}
+                  onLog={handleLogCall}
+                  onClose={() => setShowDisposition(false)}
+                />
+              ) : (
+                <div className="agent-mobile-lead-card">
+                  <div className="agent-mobile-lead-head">
+                    <div>
+                      <div className="agent-mobile-lead-name">{currentLead.name || 'Unknown'}</div>
+                      <div className="agent-mobile-lead-phone">{currentLead.phoneMasked}</div>
+                    </div>
+                    <div className="agent-mobile-chip-stack">
+                      <span className="badge" style={{ background: '#6366f122', color: '#6366f1' }}>{currentLead.status}</span>
+                      <span className="badge" style={{ background: currentLead.priority === 'high' ? '#ef444422' : '#1e293b', color: currentLead.priority === 'high' ? '#ef4444' : '#64748b' }}>
+                        {currentLead.priority}
+                      </span>
+                    </div>
+                  </div>
+
+                  {currentLead.campaign && <div className="agent-mobile-muted">{currentLead.campaign.name}</div>}
+                  {currentLead.isDnd && <div className="dnd-warning">This number is on the DND list</div>}
+
+                  {callActive ? (
+                    <div className="agent-mobile-callbar">
+                      <div className="agent-mobile-callbar__state">
+                        <span className="agent-mobile-callbar__dot" />
+                        <span>Call in progress</span>
+                      </div>
+                      <CallTimer active={callActive} />
+                      <button className="btn btn-danger" onClick={() => { setCallActive(false); setShowDisposition(true); }}>
+                        <PhoneOff size={16} /> End
+                      </button>
+                    </div>
+                  ) : (
+                    <div className="agent-mobile-inline-actions">
+                      <button
+                        className="btn btn-primary"
+                        disabled={currentLead.isDnd || initCallMutation.isPending}
+                        onClick={() => {
+                          setActiveLead(currentLead);
+                          initCallMutation.mutate(currentLead.id);
+                        }}
+                      >
+                        <Phone size={16} /> {currentLead.isDnd ? 'DND' : 'Call'}
+                      </button>
+                      <button className="btn btn-secondary" onClick={() => { setShowDisposition(true); setActiveLead(currentLead); }}>
+                        <CheckCircle size={16} /> Update
+                      </button>
+                    </div>
+                  )}
+                </div>
+              )
+            ) : (
+              <div className="empty-state">
+                <CheckCircle size={34} style={{ color: '#22c55e' }} />
+                <p style={{ fontWeight: 600 }}>All caught up</p>
+                <p>No pending leads in your queue.</p>
+              </div>
+            )}
+          </section>
+
+          <section className="card card--mobile">
+            <div className="card-header card-header--dense">
+              <div>
+                <div className="card-kicker">Recent calls</div>
+                <h2 className="card-title">Activity</h2>
+              </div>
+            </div>
+            {recentCalls.length === 0 ? (
+              <div className="empty-state"><RefreshCw size={24} style={{ opacity: 0.4 }} /><p>No recent activity</p></div>
+            ) : (
+              <div className="agent-mobile-list">
+                {recentCalls.slice(0, 4).map((rc) => (
+                  <div key={rc.id} className="agent-mobile-list-row">
+                    <div>
+                      <div className="agent-mobile-list-title">{rc.lead.name || 'Unknown'}</div>
+                      <div className="agent-mobile-list-subtitle">{rc.dispositionTag} · {new Date(rc.calledAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</div>
+                    </div>
+                    <button className="btn-icon" onClick={() => { setActiveLead(rc.lead); setShowDisposition(false); }}>
+                      <Phone size={14} />
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
+          </section>
+
+          <section className="card card--mobile">
+            <div className="card-header card-header--dense">
+              <div>
+                <div className="card-kicker">Today</div>
+                <h2 className="card-title">Follow-ups</h2>
+              </div>
+              <span className="badge" style={{ background: '#1e293b', color: '#a78bfa' }}>{followUps.length} pending</span>
+            </div>
+            {followUps.length === 0 ? (
+              <div className="empty-state"><Calendar size={24} style={{ opacity: 0.4 }} /><p>No follow-ups scheduled</p></div>
+            ) : (
+              <div className="agent-mobile-list">
+                {followUps.slice(0, 4).map((fu) => {
+                  const isOverdue = new Date(fu.scheduledAt) <= new Date();
+                  return (
+                    <div key={fu.id} className="agent-mobile-list-row">
+                      <div>
+                        <div className="agent-mobile-list-title">{fu.lead.name || 'Unknown'}</div>
+                        <div className="agent-mobile-list-subtitle" style={{ color: isOverdue ? '#ef4444' : 'var(--text-muted)' }}>
+                          {isOverdue ? 'Overdue' : 'Scheduled'} · {new Date(fu.scheduledAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                        </div>
+                      </div>
+                      <div className="agent-mobile-row-actions">
+                        <button className="btn-icon" onClick={() => { setActiveLead(fu.lead); setShowDisposition(false); }}>
+                          <ChevronRight size={15} />
+                        </button>
+                        <button className="btn-icon" onClick={() => followUpDoneMutation.mutate(fu.id)}>
+                          <CheckCircle size={15} style={{ color: '#22c55e' }} />
+                        </button>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </section>
+        </div>
+      </AppLayout>
+    );
+  }
 
   return (
     <AppLayout>

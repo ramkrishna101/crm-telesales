@@ -78,6 +78,7 @@ router.get('/', async (req: Request, res: Response, next: NextFunction) => {
           id: true, name: true, email: true, role: true,
           stringeeEmail: true, stringeeAccountId: true,
           status: true, teamId: true, createdAt: true,
+          branch: { select: { id: true, name: true } },
           team: { select: { id: true, name: true } },
         },
       }),

@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState, useSyncExternalStore } from 'react';
 import { MicOff, Phone, PhoneOff, X } from 'lucide-react';
 import { stringeeService } from '../../services/stringee.service';
+import { useIsMobile } from '../../hooks/useIsMobile';
 import Dropdown from '../ui/Dropdown';
 
 const POPUP_WIDTH = 360;
@@ -27,6 +28,7 @@ function getStatusLabel(state: ReturnType<typeof stringeeService.getSnapshot>) {
 
 export default function StringeeCallPopup() {
   const state = useSyncExternalStore(stringeeService.subscribe, stringeeService.getSnapshot);
+  const isMobile = useIsMobile();
   const popupRef = useRef<HTMLDivElement>(null);
   const dragRef = useRef<{ pointerOffsetX: number; pointerOffsetY: number } | null>(null);
   const [position, setPosition] = useState<{ x: number; y: number } | null>(null);
@@ -90,7 +92,9 @@ export default function StringeeCallPopup() {
 
   const popupPositionStyle = position
     ? { top: position.y, left: position.x }
-    : { bottom: VIEWPORT_MARGIN, right: VIEWPORT_MARGIN };
+    : isMobile
+      ? { left: 10, right: 10, bottom: 88 }
+      : { bottom: VIEWPORT_MARGIN, right: VIEWPORT_MARGIN };
 
   useEffect(() => {
     if (!position) return;
@@ -118,15 +122,16 @@ export default function StringeeCallPopup() {
   return (
     <div
       ref={popupRef}
+      className={isMobile ? 'agent-mobile-call-widget' : undefined}
       style={{
         position: 'fixed',
-        width: POPUP_WIDTH,
-        background: '#fff',
-        borderRadius: 14,
-        boxShadow: '0 20px 60px rgba(0,0,0,0.18)',
+        width: isMobile ? 'auto' : POPUP_WIDTH,
+        background: isMobile ? 'linear-gradient(180deg, #ffffff 0%, #f8fbff 100%)' : '#fff',
+        borderRadius: isMobile ? 24 : 14,
+        boxShadow: isMobile ? '0 20px 40px rgba(24, 33, 77, 0.18)' : '0 20px 60px rgba(0,0,0,0.18)',
         zIndex: 1200,
         overflow: 'hidden',
-        border: '1px solid #e5e7eb',
+        border: isMobile ? '1px solid rgba(91, 141, 239, 0.16)' : '1px solid #e5e7eb',
         fontFamily: 'system-ui, -apple-system, sans-serif',
         ...popupPositionStyle,
       }}
@@ -134,47 +139,74 @@ export default function StringeeCallPopup() {
       {/* Header */}
       <div
         onPointerDown={handleHeaderPointerDown}
+        className={isMobile ? 'agent-mobile-call-widget__header' : undefined}
         style={{
           display: 'flex',
+          flexDirection: isMobile ? 'column' : 'row',
           justifyContent: 'space-between',
-          alignItems: 'center',
-          padding: '12px 16px',
-          borderBottom: '1px solid #f1f5f9',
-          cursor: 'move',
+          alignItems: isMobile ? 'stretch' : 'center',
+          padding: isMobile ? '10px 14px 8px' : '12px 16px',
+          borderBottom: isMobile ? 'none' : '1px solid #f1f5f9',
+          cursor: isMobile ? 'default' : 'move',
           userSelect: 'none',
         }}
       >
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-          <span style={{ width: 8, height: 8, borderRadius: '50%', background: dotColor }} />
-          <span style={{ fontSize: 12, fontWeight: 600, color: '#475569' }}>{getStatusLabel(state)}</span>
-        </div>
-        <button
-          onClick={() => stringeeService.dismiss()}
-          disabled={busy}
-          style={{
-            background: 'transparent', border: 'none',
-            color: '#94a3b8', cursor: busy ? 'not-allowed' : 'pointer',
-            padding: 4, borderRadius: 6, opacity: busy ? 0.4 : 1,
-          }}
-        >
-          <X size={16} />
-        </button>
+        {isMobile ? (
+          <>
+            <span className="agent-mobile-call-widget__handle" />
+            <div className="agent-mobile-call-widget__header-row">
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                <span className="agent-mobile-call-widget__status" style={{ width: 8, height: 8, borderRadius: '50%', background: dotColor }} />
+                <span style={{ fontSize: 12, fontWeight: 700, color: '#295ebf' }}>{getStatusLabel(state)}</span>
+              </div>
+              <button
+                onClick={() => stringeeService.dismiss()}
+                disabled={busy}
+                style={{
+                  background: 'transparent', border: 'none',
+                  color: '#94a3b8', cursor: busy ? 'not-allowed' : 'pointer',
+                  padding: 4, borderRadius: 6, opacity: busy ? 0.4 : 1,
+                }}
+              >
+                <X size={18} />
+              </button>
+            </div>
+          </>
+        ) : (
+          <>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+              <span style={{ width: 8, height: 8, borderRadius: '50%', background: dotColor }} />
+              <span style={{ fontSize: 12, fontWeight: 600, color: '#475569' }}>{getStatusLabel(state)}</span>
+            </div>
+            <button
+              onClick={() => stringeeService.dismiss()}
+              disabled={busy}
+              style={{
+                background: 'transparent', border: 'none',
+                color: '#94a3b8', cursor: busy ? 'not-allowed' : 'pointer',
+                padding: 4, borderRadius: 6, opacity: busy ? 0.4 : 1,
+              }}
+            >
+              <X size={16} />
+            </button>
+          </>
+        )}
       </div>
 
       {/* Body */}
-      <div style={{ padding: '18px 16px', background: '#f8fafc' }}>
+      <div className={isMobile ? 'agent-mobile-call-widget__body' : undefined} style={{ padding: isMobile ? '10px 14px 14px' : '18px 16px', background: isMobile ? 'transparent' : '#f8fafc' }}>
         <div style={{ textAlign: 'center', marginBottom: 16 }}>
           <div style={{ fontSize: 11, textTransform: 'uppercase', letterSpacing: '0.06em', color: '#94a3b8', fontWeight: 600 }}>
             {state.callStatus === 'in_call' ? 'IN CALL' : 'TO'}
           </div>
-          <div style={{ fontSize: 16, fontWeight: 700, color: '#0f172a', marginTop: 4 }}>
+          <div className={isMobile ? 'agent-mobile-call-widget__lead' : undefined} style={{ fontSize: 16, fontWeight: 700, color: '#0f172a', marginTop: 4 }}>
             {state.activeLeadName || 'Lead'}
           </div>
-          <div style={{ fontFamily: 'ui-monospace, monospace', fontSize: 14, color: '#475569', marginTop: 2 }}>
+          <div className={isMobile ? 'agent-mobile-call-widget__phone' : undefined} style={{ fontFamily: 'ui-monospace, monospace', fontSize: 14, color: '#475569', marginTop: 2 }}>
             {state.activePhone || 'Loading number…'}
           </div>
           {busy && (
-            <div style={{ fontFamily: 'ui-monospace, monospace', fontSize: 22, fontWeight: 700, color: '#0f172a', marginTop: 10 }}>
+            <div className={isMobile ? 'agent-mobile-call-widget__timer' : undefined} style={{ fontFamily: 'ui-monospace, monospace', fontSize: 22, fontWeight: 700, color: '#0f172a', marginTop: 10 }}>
               {formatDuration(state.elapsedSeconds)}
             </div>
           )}
@@ -187,6 +219,7 @@ export default function StringeeCallPopup() {
             </div>
             {state.loadingHotlines ? (
               <div
+                className={isMobile ? 'agent-mobile-call-widget__selector' : undefined}
                 style={{
                   width: '100%',
                   height: 40,
@@ -205,6 +238,7 @@ export default function StringeeCallPopup() {
               </div>
             ) : state.hotlines.length === 0 ? (
               <div
+                className={isMobile ? 'agent-mobile-call-widget__selector' : undefined}
                 style={{
                   width: '100%',
                   height: 40,
@@ -235,6 +269,7 @@ export default function StringeeCallPopup() {
 
         {state.error && (
           <div
+            className={isMobile ? 'agent-mobile-call-widget__error' : undefined}
             style={{
               padding: '8px 12px',
               background: '#fef2f2',
@@ -261,15 +296,16 @@ export default function StringeeCallPopup() {
       </div>
 
       {/* Action buttons */}
-      <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', gap: 16, padding: '16px', background: '#fff', borderTop: '1px solid #f1f5f9', position: 'relative' }}>
+      <div className={isMobile ? 'agent-mobile-call-widget__actions' : undefined} style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', gap: isMobile ? 10 : 16, padding: isMobile ? '10px 14px 14px' : '16px', background: isMobile ? 'transparent' : '#fff', borderTop: isMobile ? 'none' : '1px solid #f1f5f9', position: 'relative' }}>
         {busy ? (
           <>
             <button
               onClick={() => stringeeService.toggleMute()}
               disabled={!state.canMute}
               title={state.muted ? 'Unmute' : 'Mute'}
+              className={isMobile ? 'agent-mobile-call-widget__button agent-mobile-call-widget__button--muted' : undefined}
               style={{
-                width: 48, height: 48, borderRadius: '50%',
+                width: isMobile ? 36 : 48, height: isMobile ? 36 : 48, borderRadius: '50%',
                 background: state.muted ? '#f59e0b' : '#e2e8f0',
                 color: state.muted ? '#fff' : '#475569',
                 border: 'none',
@@ -278,20 +314,21 @@ export default function StringeeCallPopup() {
                 display: 'flex', alignItems: 'center', justifyContent: 'center',
               }}
             >
-              <MicOff size={20} />
+              <MicOff size={isMobile ? 16 : 20} />
             </button>
             <button
               onClick={() => void stringeeService.hangup()}
               title="Hang up"
+              className={isMobile ? 'agent-mobile-call-widget__button agent-mobile-call-widget__button--danger' : undefined}
               style={{
-                width: 56, height: 56, borderRadius: '50%',
+                width: isMobile ? 36 : 56, height: isMobile ? 36 : 56, borderRadius: '50%',
                 background: '#ef4444', color: '#fff', border: 'none',
                 cursor: 'pointer',
                 display: 'flex', alignItems: 'center', justifyContent: 'center',
                 boxShadow: '0 4px 12px rgba(239,68,68,0.35)',
               }}
             >
-              <PhoneOff size={22} />
+              <PhoneOff size={isMobile ? 16 : 22} />
             </button>
           </>
         ) : (
@@ -300,8 +337,9 @@ export default function StringeeCallPopup() {
               onClick={() => void stringeeService.placeCall()}
               disabled={!canDial}
               title="Call"
+              className={isMobile ? 'agent-mobile-call-widget__button agent-mobile-call-widget__button--call' : undefined}
               style={{
-                width: 56, height: 56, borderRadius: '50%',
+                width: isMobile ? 42 : 56, height: isMobile ? 42 : 56, borderRadius: '50%',
                 background: canDial ? '#22c55e' : '#94a3b8', color: '#fff', border: 'none',
                 cursor: canDial ? 'pointer' : 'not-allowed',
                 display: 'flex', alignItems: 'center', justifyContent: 'center',
@@ -309,19 +347,20 @@ export default function StringeeCallPopup() {
                 transition: 'all 0.2s',
               }}
             >
-              <Phone size={22} />
+              <Phone size={isMobile ? 18 : 22} />
             </button>
             <button
               onClick={() => stringeeService.dismiss()}
               title="Cancel"
+              className={isMobile ? 'agent-mobile-call-widget__button' : undefined}
               style={{
-                width: 48, height: 48, borderRadius: '50%',
+                width: isMobile ? 36 : 48, height: isMobile ? 36 : 48, borderRadius: '50%',
                 background: '#e2e8f0', color: '#475569', border: 'none',
                 cursor: 'pointer',
                 display: 'flex', alignItems: 'center', justifyContent: 'center',
               }}
             >
-              <X size={20} />
+              <X size={isMobile ? 16 : 20} />
             </button>
           </>
         )}
@@ -331,9 +370,10 @@ export default function StringeeCallPopup() {
           <button
             onClick={() => stringeeService.openOutcomeForActiveLead()}
             title="Log call outcome"
+            className={isMobile ? 'agent-mobile-call-widget__log' : undefined}
             style={{
-              position: 'absolute', right: 14, top: '50%', transform: 'translateY(-50%)',
-              padding: '6px 12px', fontSize: 12, fontWeight: 600,
+              position: isMobile ? 'static' : 'absolute', right: 14, top: '50%', transform: isMobile ? 'none' : 'translateY(-50%)',
+              padding: isMobile ? '4px 10px' : '6px 12px', fontSize: isMobile ? 11 : 12, fontWeight: 600,
               background: '#eff6ff', color: '#1d4ed8',
               border: '1px solid #bfdbfe', borderRadius: 6,
               cursor: 'pointer',

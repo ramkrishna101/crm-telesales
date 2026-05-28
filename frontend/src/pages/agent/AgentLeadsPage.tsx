@@ -2,10 +2,11 @@ import { useState, useSyncExternalStore, useEffect } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { leadsService, callsService, tagsService } from '../../services/crm.service';
 import AppLayout from '../../components/layout/AppLayout';
+import { useIsMobile } from '../../hooks/useIsMobile';
 import Dropdown from '../../components/ui/Dropdown';
 import { 
   Search, User, Phone, Calendar, MessageSquare, 
-  ExternalLink, ChevronLeft, ChevronRight, Mail, Hash, Clock, History, PhoneCall
+  ExternalLink, ChevronLeft, ChevronRight, Mail, Hash, Clock, History, PhoneCall, SlidersHorizontal
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { stringeeService } from '../../services/stringee.service';
@@ -72,6 +73,7 @@ const RESULT_COLORS: Record<string, { bg: string; fg: string }> = {
 };
 
 export default function AgentLeadsPage() {
+  const isMobile = useIsMobile();
   const [searchTerm, setSearchTerm] = useState('');
   const [debouncedSearch, setDebouncedSearch] = useState('');
   // Draft state — bound to the dropdowns. Not used for querying.
@@ -86,6 +88,7 @@ export default function AgentLeadsPage() {
   const PAGE_SIZE = 20;
   const [selectedLeadId, setSelectedLeadId] = useState<string | null>(null);
   const [isModalOpen, setIsModalOpen] = useState(false);
+  const [isFilterSheetOpen, setIsFilterSheetOpen] = useState(false);
 
   const hasUnapplied =
     draftStatus !== statusFilter ||
@@ -152,6 +155,19 @@ export default function AgentLeadsPage() {
   const rangeEnd = Math.min(page * PAGE_SIZE, total);
   const filteredLeads = leads;
 
+  useEffect(() => {
+    if (!isMobile) return;
+
+    if (filteredLeads.length === 0) {
+      setSelectedLeadId(null);
+      return;
+    }
+
+    if (!selectedLeadId || !filteredLeads.some((lead) => lead.id === selectedLeadId)) {
+      setSelectedLeadId(filteredLeads[0].id);
+    }
+  }, [filteredLeads, isMobile, selectedLeadId]);
+
   const handleCall = async (lead: Lead) => {
     try {
       await stringeeService.startCall(lead.id, lead.name || 'Lead');
@@ -159,6 +175,204 @@ export default function AgentLeadsPage() {
       toast.error(error instanceof Error ? error.message : 'Unable to start call');
     }
   };
+
+  const selectedLead = filteredLeads.find((lead) => lead.id === selectedLeadId) || filteredLeads[0] || null;
+  const selectedLeadIndex = selectedLead ? filteredLeads.findIndex((lead) => lead.id === selectedLead.id) : -1;
+
+  if (isMobile) {
+    return (
+      <AppLayout>
+        <div className="agent-mobile-stack">
+          <section className="agent-mobile-summary-card">
+            <div className="section-eyebrow">Assigned queue</div>
+            <h1 className="agent-mobile-section-title">My Leads</h1>
+            <p className="page-subtitle" style={{ marginTop: 6 }}>
+              {total > 0 ? `Showing ${rangeStart}-${rangeEnd} of ${total} assigned leads` : 'All leads currently assigned to you'}
+            </p>
+
+            <div className="agent-mobile-search-row">
+              <div className="agent-mobile-searchbox">
+                <Search size={15} style={{ color: 'var(--text-muted)' }} />
+                <input
+                  type="text"
+                  className="agent-mobile-searchbox__input"
+                  placeholder="Search name, phone, email..."
+                  value={searchTerm}
+                  onChange={(e) => setSearchTerm(e.target.value)}
+                />
+              </div>
+              <button className="agent-mobile-filter-btn" type="button" onClick={() => setIsFilterSheetOpen(true)}>
+                <SlidersHorizontal size={16} />
+                <span>Filters</span>
+              </button>
+            </div>
+          </section>
+
+          {selectedLead && (
+            <div className="agent-mobile-switcher">
+              <button
+                className="btn-icon"
+                type="button"
+                disabled={selectedLeadIndex <= 0}
+                onClick={() => setSelectedLeadId(filteredLeads[selectedLeadIndex - 1]?.id || null)}
+              >
+                <ChevronLeft size={16} />
+              </button>
+              <span className="agent-mobile-switcher__label">
+                {selectedLeadIndex + 1} / {filteredLeads.length}
+              </span>
+              <button
+                className="btn-icon"
+                type="button"
+                disabled={selectedLeadIndex >= filteredLeads.length - 1}
+                onClick={() => setSelectedLeadId(filteredLeads[selectedLeadIndex + 1]?.id || null)}
+              >
+                <ChevronRight size={16} />
+              </button>
+            </div>
+          )}
+
+          <section className="card card--mobile">
+            {isLoading ? (
+              <div className="empty-state">Loading your leads...</div>
+            ) : !selectedLead ? (
+              <div className="empty-state">No leads match the current filters.</div>
+            ) : (() => {
+              const colors = STATUS_COLORS[selectedLead.status] || STATUS_COLORS.uncontacted;
+              const isActiveCall = callState.activeLeadId === selectedLead.id && ['dialing', 'ringing', 'in_call'].includes(callState.callStatus);
+              const isBlocked = !!callState.activeLeadId && callState.activeLeadId !== selectedLead.id && ['dialing', 'ringing', 'in_call'].includes(callState.callStatus);
+              return (
+                <div className="agent-mobile-lead-card">
+                  <div className="agent-mobile-lead-head">
+                    <div>
+                      <div className="agent-mobile-lead-name">{selectedLead.name || 'Unknown'}</div>
+                      <div className="agent-mobile-lead-phone">{selectedLead.phone}</div>
+                      {selectedLead.email && <div className="agent-mobile-muted">{selectedLead.email}</div>}
+                    </div>
+                    <div className="agent-mobile-chip-stack">
+                      <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6, background: colors.bg, color: colors.fg, fontSize: '0.7rem', fontWeight: 600, padding: '4px 10px', borderRadius: 999, textTransform: 'capitalize' }}>
+                        <span style={{ width: 6, height: 6, borderRadius: '50%', background: colors.dot }} />
+                        {STATUS_LABELS[selectedLead.status] || selectedLead.status.replace('_', ' ')}
+                      </span>
+                      <span className="badge" style={{ background: selectedLead.priority === 'high' ? '#fef2f2' : '#eef2f7', color: selectedLead.priority === 'high' ? '#dc2626' : '#475569' }}>
+                        {selectedLead.priority}
+                      </span>
+                    </div>
+                  </div>
+
+                  <div className="agent-mobile-detail-grid">
+                    <div className="agent-mobile-detail-row"><Hash size={13} /> <span>{selectedLead.campaign?.name || 'Standard'}</span></div>
+                    <div className="agent-mobile-detail-row"><Clock size={13} /> <span>{selectedLead.lastCalledAt ? new Date(selectedLead.lastCalledAt).toLocaleDateString() : 'Never called'}</span></div>
+                    <div className="agent-mobile-detail-row"><MessageSquare size={13} /> <span>{selectedLead.lastCallResult || 'No call result yet'}</span></div>
+                  </div>
+
+                  <div className="agent-mobile-inline-actions">
+                    <button
+                      className="btn btn-primary"
+                      disabled={isBlocked}
+                      onClick={() => void handleCall(selectedLead)}
+                    >
+                      <PhoneCall size={14} /> {isActiveCall ? 'Calling' : 'Call'}
+                    </button>
+                    <button
+                      className="btn btn-secondary"
+                      onClick={() => {
+                        setSelectedLeadId(selectedLead.id);
+                        setIsModalOpen(true);
+                      }}
+                    >
+                      <ExternalLink size={14} /> View
+                    </button>
+                  </div>
+                </div>
+              );
+            })()}
+          </section>
+
+          {total > PAGE_SIZE && (
+            <section className="card card--mobile">
+              <div className="agent-mobile-pagination">
+                <div>
+                  Page <strong>{page}</strong> of <strong>{totalPages}</strong>
+                  {isFetching && <span style={{ marginLeft: 8, opacity: 0.6 }}>Loading...</span>}
+                </div>
+                <div className="agent-mobile-row-actions">
+                  <button className="btn-icon" onClick={() => setPage((p) => Math.max(1, p - 1))} disabled={page <= 1}><ChevronLeft size={16} /></button>
+                  <button className="btn-icon" onClick={() => setPage((p) => Math.min(totalPages, p + 1))} disabled={page >= totalPages}><ChevronRight size={16} /></button>
+                </div>
+              </div>
+            </section>
+          )}
+
+          {isFilterSheetOpen && (
+            <div className="agent-mobile-sheet-backdrop" onClick={() => setIsFilterSheetOpen(false)}>
+              <div className="agent-mobile-sheet" onClick={(event) => event.stopPropagation()}>
+                <div className="agent-mobile-sheet__header">
+                  <div>
+                    <div className="section-eyebrow">Leads filters</div>
+                    <h2 className="card-title">Filter leads</h2>
+                  </div>
+                  <button className="btn-icon" onClick={() => setIsFilterSheetOpen(false)}>
+                    <ExternalLink size={14} style={{ transform: 'rotate(45deg)' }} />
+                  </button>
+                </div>
+
+                <div className="agent-mobile-sheet__body">
+                  <Dropdown
+                    value={draftStatus}
+                    onChange={setDraftStatus}
+                    placeholder="All followup statuses"
+                    options={STATUS_OPTIONS.map((option) => ({
+                      value: option.value,
+                      label: option.label,
+                      colour: option.value ? STATUS_COLORS[option.value]?.dot : undefined,
+                    }))}
+                  />
+                  <Dropdown
+                    value={draftCallResult}
+                    onChange={setDraftCallResult}
+                    placeholder="All call results"
+                    options={[
+                      { value: '', label: 'All call results' },
+                      ...dispositionTags.map((tag) => {
+                        const key = tag.name.toLowerCase();
+                        return {
+                          value: tag.name,
+                          label: tag.name,
+                          colour: tag.color || RESULT_COLORS[key]?.fg,
+                        };
+                      }),
+                    ]}
+                  />
+                  <Dropdown
+                    value={draftPriority}
+                    onChange={setDraftPriority}
+                    placeholder="All priorities"
+                    options={PRIORITY_OPTIONS}
+                  />
+                </div>
+
+                <div className="agent-mobile-sheet__actions">
+                  <button className="btn btn-secondary" onClick={() => { resetFilters(); setIsFilterSheetOpen(false); }} disabled={!hasActiveFilters}>Reset</button>
+                  <button className="btn btn-primary" onClick={() => { applyFilters(); setIsFilterSheetOpen(false); }} disabled={!hasUnapplied}>Apply</button>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {isModalOpen && selectedLeadId && (
+            <LeadDetailsModal
+              leadId={selectedLeadId}
+              onClose={() => {
+                setIsModalOpen(false);
+                setSelectedLeadId(selectedLeadId);
+              }}
+            />
+          )}
+        </div>
+      </AppLayout>
+    );
+  }
 
   return (
     <AppLayout>

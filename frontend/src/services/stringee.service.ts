@@ -98,6 +98,7 @@ declare global {
 }
 
 class StringeeService {
+  private static readonly DIALING_TIMEOUT_MS = 15000;
   private snapshot: StringeeSnapshot = initialSnapshot;
   private listeners = new Set<() => void>();
   private sdkPromise: Promise<void> | null = null;
@@ -113,6 +114,7 @@ class StringeeService {
   private callAnsweredAt: number | null = null;
   private currentCallId: string | null = null;
   private currentFromNumber: string | null = null;
+  private dialingTimeoutId: number | null = null;
 
   subscribe = (listener: () => void) => {
     this.listeners.add(listener);
@@ -135,6 +137,72 @@ class StringeeService {
       window.clearInterval(this.timerId);
       this.timerId = null;
     }
+  }
+
+  private clearDialingTimeout() {
+    if (this.dialingTimeoutId !== null) {
+      window.clearTimeout(this.dialingTimeoutId);
+      this.dialingTimeoutId = null;
+    }
+  }
+
+  private async ensureMicrophoneAccess(): Promise<void> {
+    if (!navigator.mediaDevices?.getUserMedia) {
+      throw new Error('Microphone access is not supported on this device/browser');
+    }
+
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      stream.getTracks().forEach((track) => track.stop());
+    } catch (error) {
+      const mediaError = error as DOMException | undefined;
+      const name = mediaError?.name || '';
+
+      if (name === 'NotAllowedError' || name === 'PermissionDeniedError') {
+        throw new Error('Microphone permission is blocked. Allow microphone access and try again');
+      }
+
+      if (name === 'NotReadableError' || name === 'TrackStartError') {
+        throw new Error('Microphone is unavailable. Close other apps using it and try again');
+      }
+
+      throw new Error('Microphone access failed. Check device permissions and try again');
+    }
+  }
+
+  private startDialingTimeout() {
+    this.clearDialingTimeout();
+    this.dialingTimeoutId = window.setTimeout(() => {
+      if (this.snapshot.callStatus !== 'dialing') return;
+      const timeoutReason = this.currentCallId
+        ? 'Call request accepted, but provider never started ringing'
+        : 'Call setup timed out';
+      this.failActiveCall(timeoutReason);
+    }, StringeeService.DIALING_TIMEOUT_MS);
+  }
+
+  private failActiveCall(reason: string) {
+    const activeCall = this.call;
+    this.clearTimer();
+    this.clearDialingTimeout();
+    this.detachRemoteAudio();
+    if (!this.snapshot.lastCall || this.snapshot.lastCall.leadId !== this.snapshot.activeLeadId) {
+      this.finaliseCall(false, reason);
+    }
+    try {
+      activeCall?.hangup?.(() => {});
+    } catch {
+      // ignore
+    }
+    if (this.call === activeCall) {
+      this.call = null;
+      this.currentCallId = null;
+    }
+    this.update({
+      callStatus: 'failed',
+      error: reason,
+      canMute: false,
+    });
   }
 
   // Lazily create a hidden <audio autoplay> element the Stringee remote
@@ -340,38 +408,53 @@ class StringeeService {
   }
 
   private attachCallEvents(call: any) {
+    const isCurrentCall = () => this.call === call;
+
     call.on('signalingstate', (state: any) => {
+      if (!isCurrentCall()) return;
       const code = state?.code;
       // 1=calling, 2=ringing, 3=answered, 4=busy, 5=ended, 6=rejected
       if (code === 1) this.update({ callStatus: 'dialing' });
-      else if (code === 2) this.update({ callStatus: 'ringing' });
+      else if (code === 2) {
+        this.clearDialingTimeout();
+        this.update({ callStatus: 'ringing' });
+      }
       else if (code === 3) {
+        this.clearDialingTimeout();
         this.callAnsweredAt = Date.now();
         this.update({ callStatus: 'in_call', canMute: true });
         this.startTimer();
       } else if (code === 4 || code === 6) {
+        this.clearDialingTimeout();
         this.clearTimer();
         this.detachRemoteAudio();
         const reason = state?.reason || (code === 4 ? 'Busy' : 'Rejected');
         this.finaliseCall(false, reason);
+        this.call = null;
+        this.currentCallId = null;
         this.update({ callStatus: 'failed', error: reason, canMute: false });
       } else if (code === 5) {
+        this.clearDialingTimeout();
         this.clearTimer();
         this.detachRemoteAudio();
         const wasAnswered = !!this.callAnsweredAt;
         const reason = state?.reason || (wasAnswered ? 'AGENT_END_CALL' : 'NO_ANSWER');
         this.finaliseCall(wasAnswered, reason);
+        this.call = null;
+        this.currentCallId = null;
         this.update({ callStatus: 'ended', canMute: false });
       }
     });
 
     call.on('mediastate', (_state: any) => {
+      if (!isCurrentCall()) return;
       // could surface audio state here if needed
     });
 
     // Pipe the carrier-side audio (ringback during 183, voice after 200 OK)
     // into a hidden <audio> element so the agent actually hears the call.
     call.on('addremotestream', (stream: MediaStream) => {
+      if (!isCurrentCall()) return;
       const el = this.ensureRemoteAudio();
       try {
         el.srcObject = stream;
@@ -386,17 +469,23 @@ class StringeeService {
     // We don't need to render local mic, but accepting the event prevents
     // SDK warnings on some versions.
     call.on('addlocalstream', (_stream: MediaStream) => {
+      if (!isCurrentCall()) return;
       // no-op
     });
 
     call.on('info', (_info: any) => {
+      if (!isCurrentCall()) return;
       // ignore
     });
 
     call.on('otherdevice', () => {
+      if (!isCurrentCall()) return;
+      this.clearDialingTimeout();
       this.clearTimer();
       this.detachRemoteAudio();
       this.finaliseCall(!!this.callAnsweredAt, 'OTHER_DEVICE');
+      this.call = null;
+      this.currentCallId = null;
       this.update({ callStatus: 'ended' });
     });
   }
@@ -534,6 +623,8 @@ class StringeeService {
     }
 
     try {
+      await this.ensureMicrophoneAccess();
+
       // (Re)authenticate WS if needed \u2014 transparent to the agent.
       if (this.snapshot.connectionStatus !== 'connected') {
         await this.ensureConnected();
@@ -552,9 +643,11 @@ class StringeeService {
       if (!list.length) throw new Error('No hotlines available');
 
       this.update({ callStatus: 'dialing', error: null });
+      this.startDialingTimeout();
       await this.dialWithFallback(list, customerNumber);
     } catch (error) {
       this.clearTimer();
+      this.clearDialingTimeout();
       const msg = error instanceof Error ? error.message : 'Failed to start call';
       // If signalingstate never fired, surface the failure to the outcome modal anyway.
       if (!this.snapshot.lastCall || this.snapshot.lastCall.leadId !== this.snapshot.activeLeadId) {
@@ -642,6 +735,7 @@ class StringeeService {
       }
     }
     this.clearTimer();
+    this.clearDialingTimeout();
     this.detachRemoteAudio();
     this.update({ callStatus: 'ended', canMute: false });
   };
@@ -659,6 +753,7 @@ class StringeeService {
 
   dismiss = () => {
     this.clearTimer();
+    this.clearDialingTimeout();
     if (
       this.snapshot.callStatus === 'dialing' ||
       this.snapshot.callStatus === 'ringing' ||
@@ -682,6 +777,7 @@ class StringeeService {
 
   resetSession = () => {
     this.clearTimer();
+    this.clearDialingTimeout();
     this.detachRemoteAudio();
     if (this.call) {
       try {

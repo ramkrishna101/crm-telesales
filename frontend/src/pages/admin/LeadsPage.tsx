@@ -388,6 +388,15 @@ export default function LeadsPage() {
     uncontacted: '#6f63ff', contacted: '#3b82f6', lead: '#1f9d55',
     not_interested: '#dc2626', dnd: '#c2410c', invalid: '#64748b', callback: '#c67a0a',
   };
+  const statusLabel: Record<string, string> = {
+    uncontacted: 'Uncontacted',
+    contacted: 'Contacted',
+    lead: 'Interested',
+    callback: 'Callback',
+    not_interested: 'Not Interested',
+    dnd: 'DND',
+    invalid: 'Invalid',
+  };
   const priorityTone: Record<string, { background: string; color: string }> = {
     high: { background: '#fff0f0', color: '#dc2626' },
     normal: { background: '#eef2f7', color: '#64748b' },
@@ -579,7 +588,7 @@ export default function LeadsPage() {
               </div>
               <div className="table-cell">
                 <span className="badge" style={{ background: (statusColour[l.status] || '#6366f1') + '1a', color: statusColour[l.status] || '#6366f1' }}>
-                  {l.status.replace('_', ' ')}
+                  {statusLabel[l.status] || l.status.replace('_', ' ')}
                 </span>
               </div>
               <div className="table-cell">

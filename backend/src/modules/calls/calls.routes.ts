@@ -7,11 +7,16 @@ import { AppError } from '../../middleware/errorHandler';
 import { param } from '../../lib/params';
 import { io } from '../../index';
 import { ADMIN_ROLES, assertBranchAccess, getUserBranchId, isSuperAdmin } from '../../lib/access';
+import { fetchStringeeCdr } from '../../lib/stringee';
 
 const router = Router();
 router.use(authenticate);
 
 // ── Schemas ───────────────────────────────────────────────────────────
+
+const FOLLOWUP_STATUSES = [
+  'uncontacted', 'contacted', 'lead', 'callback', 'not_interested', 'dnd', 'invalid',
+] as const;
 
 const logCallSchema = z.object({
   leadId: z.string().uuid(),
@@ -19,6 +24,9 @@ const logCallSchema = z.object({
   durationSeconds: z.number().int().min(0).default(0),
   notes: z.string().max(2000).optional(),
   telephonyRef: z.string().optional(),
+  // Optional lifecycle stage. When omitted, the lead's current status is preserved
+  // — so a previously "Interested" lead won't get overwritten by a follow-up RNR.
+  followupStatus: z.enum(FOLLOWUP_STATUSES).optional(),
 });
 
 // ── POST /api/calls ───────────────────────────────────────────────────
@@ -43,18 +51,20 @@ router.post('/', async (req: Request, res: Response, next: NextFunction) => {
     });
     if (!tagExists) throw new AppError(400, 'INVALID_TAG', `Disposition tag "${body.dispositionTag}" does not exist`);
 
-    // Map tag → lead status
-    const tagToStatus: Record<string, string> = {
-      'RNR': 'contacted',
-      'Busy': 'contacted',
-      'Interested': 'lead',
-      'Not Interested': 'not_interested',
-      'Callback': 'callback',
-      'DND': 'dnd',
-      'Invalid Number': 'invalid',
-    };
-
-    const newStatus = tagToStatus[body.dispositionTag] || 'contacted';
+    // Followup status logic:
+    //   • If the agent explicitly picks one, honour it.
+    //   • Otherwise keep the existing lead.status unless this is the first contact
+    //     (uncontacted → contacted) so the inbox reflects the touch.
+    //   • DND tag always forces dnd regardless (safety net — must be on blocklist).
+    let nextStatus: string = lead.status;
+    if (body.followupStatus) {
+      nextStatus = body.followupStatus;
+    } else if (lead.status === 'uncontacted') {
+      nextStatus = 'contacted';
+    }
+    if (body.dispositionTag === 'DND') {
+      nextStatus = 'dnd';
+    }
 
     // Run call log + lead update atomically
     const [callLog] = await prisma.$transaction([
@@ -75,9 +85,9 @@ router.post('/', async (req: Request, res: Response, next: NextFunction) => {
       prisma.lead.update({
         where: { id: body.leadId },
         data: {
-          status: newStatus as never,
+          status: nextStatus as never,
           lastCalledAt: new Date(),
-          ...(newStatus === 'dnd' && { isDnd: true }),
+          ...(nextStatus === 'dnd' && { isDnd: true }),
         },
       }),
       // Auto-complete pending follow-ups for this lead
@@ -88,7 +98,7 @@ router.post('/', async (req: Request, res: Response, next: NextFunction) => {
     ]);
 
     // Add to DND blocklist if needed
-    if (newStatus === 'dnd') {
+    if (nextStatus === 'dnd') {
       await prisma.dndBlocklist.upsert({
         where: { phone: lead.phone },
         create: { phone: lead.phone, reason: 'Agent-marked DND via call log' },
@@ -295,6 +305,26 @@ router.get('/summary', requireRole(...ADMIN_ROLES, 'supervisor'), async (req: Re
         })),
       },
     });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// ── GET /api/calls/cdr/:callId ────────────────────────────────────────
+// Fetches the server-side Call Detail Record from Stringee for the given
+// telephony call id. Returns null fields if Stringee has not yet written
+// the CDR (eventually consistent — typically available a few seconds after
+// hangup). Falls back gracefully if all endpoints reject.
+
+router.get('/cdr/:callId', async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const callId = param(req, 'callId');
+    const cdr = await fetchStringeeCdr(callId);
+    if (!cdr) {
+      res.json({ success: true, data: null });
+      return;
+    }
+    res.json({ success: true, data: cdr });
   } catch (err) {
     next(err);
   }
