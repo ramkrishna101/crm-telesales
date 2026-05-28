@@ -3,6 +3,8 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { Toaster } from 'react-hot-toast';
 import AppRouter from './router/AppRouter';
 import { useSocket } from './hooks/useSocket';
+import StringeeCallPopup from './components/calls/StringeeCallPopup';
+import PostCallOutcomeModal from './components/calls/PostCallOutcomeModal';
 import './index.css';
 
 const queryClient = new QueryClient({
@@ -23,6 +25,8 @@ function App() {
       <QueryClientProvider client={queryClient}>
         <SocketBootstrap />
         <AppRouter />
+        <StringeeCallPopup />
+        <PostCallOutcomeModal />
         <Toaster
           position="top-right"
           toastOptions={{
