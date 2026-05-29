@@ -1,6 +1,6 @@
 import { StringeePortalConfig } from '@prisma/client';
 import { AppError } from '../middleware/errorHandler';
-import { decryptCredential, encryptCredential, isStringeeEnabled } from './stringee';
+import { decryptCredential, encryptCredential } from './stringee';
 import { prisma } from './prisma';
 
 export interface StringeePortalSummary {
@@ -33,31 +33,6 @@ type PortalRecord = Pick<
   StringeePortalConfig,
   'id' | 'branchId' | 'portalName' | 'tenant' | 'apiSidEnc' | 'apiSecretEnc' | 'adminEmailEnc' | 'adminPasswordEnc' | 'createdAt' | 'updatedAt'
 >;
-
-function resolveLegacyStringeePortalConfig(branchId: string | null | undefined): ResolvedStringeePortalConfig | null {
-  const apiSid = process.env.STRINGEE_API_SID?.trim();
-  const apiSecret = process.env.STRINGEE_API_SECRET?.trim();
-  const tenant = process.env.STRINGEEX_TENANT?.trim();
-  const adminEmail = process.env.STRINGEEX_ADMIN_EMAIL?.trim();
-  const adminPassword = process.env.STRINGEEX_ADMIN_PASSWORD;
-
-  if (!isStringeeEnabled()) return null;
-  if (!apiSid || !apiSecret || !tenant || !adminEmail || !adminPassword) return null;
-
-  return {
-    id: 'legacy-global-stringee',
-    branchId: branchId || 'legacy-global-branch',
-    portalName: 'Legacy Global Stringee',
-    tenant,
-    adminEmailMasked: maskEmail(adminEmail),
-    createdAt: new Date(0),
-    updatedAt: new Date(0),
-    apiSid,
-    apiSecret,
-    adminEmail,
-    adminPassword,
-  };
-}
 
 function maskEmail(email: string): string {
   const [local, domain] = email.split('@');
@@ -158,8 +133,6 @@ export async function resolveAssignedStringeePortalForUser(userId: string): Prom
 
   if (!user) throw new AppError(404, 'USER_NOT_FOUND', 'User not found');
   if (!user.stringeePortalConfigId || !user.stringeePortalConfig) {
-    const legacyConfig = resolveLegacyStringeePortalConfig(user.branchId);
-    if (legacyConfig) return legacyConfig;
     throw new AppError(503, 'NO_DIALER_AVAILABLE', 'No dialer available');
   }
   if (!user.branchId || user.stringeePortalConfig.branchId !== user.branchId) {
