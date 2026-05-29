@@ -21,6 +21,13 @@ export const branchesService = {
   update: (id: string, data: Record<string, unknown>) => api.put(`/branches/${id}`, data),
 };
 
+export const stringeePortalConfigsService = {
+  list: (params?: Record<string, string>) => api.get('/stringee-portals', { params }),
+  get: (id: string) => api.get(`/stringee-portals/${id}`),
+  create: (data: Record<string, unknown>) => api.post('/stringee-portals', data),
+  update: (id: string, data: Record<string, unknown>) => api.put(`/stringee-portals/${id}`, data),
+};
+
 // ── Users ─────────────────────────────────────────────────────────────
 export const usersService = {
   list: (params?: Record<string, string | number>) =>

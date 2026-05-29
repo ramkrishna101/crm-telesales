@@ -1187,6 +1187,8 @@ input, textarea, select { font-family: inherit; }
 .agent-mobile-outcome-sheet {
   background: linear-gradient(180deg, #ffffff 0%, #f8fbff 100%) !important;
   max-height: 78vh !important;
+  display: flex;
+  flex-direction: column;
   overflow: hidden !important;
 }
 
@@ -1230,11 +1232,16 @@ input, textarea, select { font-family: inherit; }
 }
 
 .agent-mobile-outcome-sheet__form-block {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
   border-top: 1px solid rgba(91, 141, 239, 0.08);
-  border-bottom: 1px solid rgba(91, 141, 239, 0.1);
+  background: linear-gradient(180deg, rgba(91, 141, 239, 0.035) 0%, transparent 100%);
 }
 
 .agent-mobile-outcome-sheet__info-block {
+  flex: 1 1 auto;
+  min-height: 0;
   overflow-y: auto;
   background: linear-gradient(180deg, rgba(91, 141, 239, 0.035) 0%, transparent 100%);
 }
@@ -1340,6 +1347,7 @@ input, textarea, select { font-family: inherit; }
 }
 
 .agent-mobile-outcome-sheet__footer {
+  flex-shrink: 0;
   background: #f8fbff;
   display: grid !important;
   grid-template-columns: 108px minmax(0, 1fr);

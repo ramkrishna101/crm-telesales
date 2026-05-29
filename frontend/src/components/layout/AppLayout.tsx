@@ -6,13 +6,14 @@ import toast from 'react-hot-toast';
 import {
   LayoutDashboard, Users, Building2, PhoneCall,
   BarChart3, LogOut, ChevronRight, Bell,
-  UserCheck, FolderOpen, ListChecks, Tag, UserCircle2
+  UserCheck, FolderOpen, ListChecks, Tag, UserCircle2, Settings2
 } from 'lucide-react';
 
 interface NavItem { icon: React.ReactNode; label: string; to: string; }
 
 const branchAdminNav: NavItem[] = [
   { icon: <LayoutDashboard size={18} />, label: 'Dashboard', to: '/admin' },
+  { icon: <Settings2 size={18} />, label: 'Configuration', to: '/admin/configuration' },
   { icon: <FolderOpen size={18} />, label: 'Campaigns', to: '/admin/campaigns' },
   { icon: <Users size={18} />, label: 'Leads', to: '/admin/leads' },
   { icon: <UserCheck size={18} />, label: 'Users', to: '/admin/users' },
@@ -25,6 +26,7 @@ const branchAdminNav: NavItem[] = [
 const superAdminNav: NavItem[] = [
   { icon: <LayoutDashboard size={18} />, label: 'Dashboard', to: '/admin' },
   { icon: <Building2 size={18} />, label: 'Branches', to: '/admin/branches' },
+  { icon: <Settings2 size={18} />, label: 'Configuration', to: '/admin/configuration' },
   { icon: <FolderOpen size={18} />, label: 'Campaigns', to: '/admin/campaigns' },
   { icon: <Users size={18} />, label: 'Leads', to: '/admin/leads' },
   { icon: <UserCheck size={18} />, label: 'Users', to: '/admin/users' },

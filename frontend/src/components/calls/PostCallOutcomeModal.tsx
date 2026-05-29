@@ -174,6 +174,8 @@ export default function PostCallOutcomeModal() {
   if (!visible || !state.lastCall) return null;
   const lc = state.lastCall;
   const currentStatus = STATUS_LABELS[liveLead?.status] || { label: liveLead?.status || 'Unknown', bg: '#f1f5f9', fg: '#475569' };
+  const displayLeadName = lc.leadName || state.activeLeadName || liveLead?.name || 'Lead';
+  const displayPhone = lc.phone || state.activePhone || null;
 
   const callInformationBody = (
     <Grid mobile={isMobile} mobileColumns={2}>
@@ -319,7 +321,9 @@ export default function PostCallOutcomeModal() {
               <div className="agent-mobile-outcome-sheet__handle" style={{ width: 42, height: 4, borderRadius: 999, background: '#dbe3ef', margin: '0 auto 12px' }} />
             )}
             <div className={isMobile ? 'agent-mobile-outcome-sheet__eyebrow' : undefined} style={{ fontSize: 11, textTransform: 'uppercase', color: '#94a3b8', fontWeight: 600, letterSpacing: '0.06em' }}>{isMobile ? 'Call Outcome' : 'Post Call'}</div>
-            <div className={isMobile ? 'agent-mobile-outcome-sheet__leadline' : undefined} style={{ fontSize: isMobile ? 16 : 18, fontWeight: 700, color: '#0f172a', lineHeight: 1.3 }}>{lc.leadName || 'Lead'} · {lc.phone}</div>
+            <div className={isMobile ? 'agent-mobile-outcome-sheet__leadline' : undefined} style={{ fontSize: isMobile ? 16 : 18, fontWeight: 700, color: '#0f172a', lineHeight: 1.3 }}>
+              {displayLeadName}{displayPhone ? ` · ${displayPhone}` : ''}
+            </div>
           </div>
           {isMobile && (
             <div
@@ -340,10 +344,6 @@ export default function PostCallOutcomeModal() {
         {isMobile ? (
           <>
             <div className="agent-mobile-outcome-sheet__form-block">{outcomeBody}</div>
-            <div className="agent-mobile-outcome-sheet__info-block">
-              <div className="agent-mobile-outcome-sheet__info-title">Call Information</div>
-              {callInformationBody}
-            </div>
           </>
         ) : (
           <>
@@ -380,7 +380,7 @@ export default function PostCallOutcomeModal() {
               width: isMobile ? '100%' : 'auto',
             }}
           >
-            {logMutation.isPending ? 'Saving…' : 'Log'}
+            {logMutation.isPending ? 'Saving…' : 'Log Outcome'}
           </button>
         </div>
       </div>

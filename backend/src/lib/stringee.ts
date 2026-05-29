@@ -8,6 +8,13 @@ const DEFAULT_SERVER_ADDRS = [
 
 const DEFAULT_TOKEN_TTL_SECONDS = 3600;
 
+export interface StringeeCredentialConfig {
+  apiSid: string;
+  apiSecret: string;
+  serverAddrs?: string[] | null;
+  tokenTtlSeconds?: number | null;
+}
+
 function encodeBase64Url(value: Buffer | string): string {
   return Buffer.from(value)
     .toString('base64')
@@ -16,11 +23,27 @@ function encodeBase64Url(value: Buffer | string): string {
     .replace(/\//g, '_');
 }
 
-export function isStringeeEnabled(): boolean {
-  return process.env.STRINGEE_ENABLED !== 'false';
+function resolveApiSid(config?: StringeeCredentialConfig): string | undefined {
+  return config?.apiSid?.trim() || process.env.STRINGEE_API_SID;
 }
 
-export function getStringeeServerAddrs(): string[] {
+function resolveApiSecret(config?: StringeeCredentialConfig): string | undefined {
+  return config?.apiSecret?.trim() || process.env.STRINGEE_API_SECRET;
+}
+
+export function isStringeeEnabled(config?: Partial<StringeeCredentialConfig>): boolean {
+  if (config) {
+    return Boolean(config.apiSid && config.apiSecret);
+  }
+
+  return process.env.STRINGEE_ENABLED !== 'false' && Boolean(process.env.STRINGEE_API_SID && process.env.STRINGEE_API_SECRET);
+}
+
+export function getStringeeServerAddrs(config?: Partial<StringeeCredentialConfig>): string[] {
+  if (config?.serverAddrs?.length) {
+    return config.serverAddrs.map((addr) => addr.trim()).filter(Boolean);
+  }
+
   const raw = process.env.STRINGEE_SERVER_ADDRS;
   if (!raw) return DEFAULT_SERVER_ADDRS;
 
@@ -30,15 +53,20 @@ export function getStringeeServerAddrs(): string[] {
     .filter(Boolean);
 }
 
-export function getStringeeTokenTtlSeconds(): number {
+export function getStringeeTokenTtlSeconds(config?: Partial<StringeeCredentialConfig>): number {
+  const explicit = config?.tokenTtlSeconds;
+  if (typeof explicit === 'number' && Number.isFinite(explicit) && explicit > 0) {
+    return explicit;
+  }
+
   const parsed = parseInt(process.env.STRINGEE_TOKEN_TTL_SECONDS || '', 10);
   if (!Number.isFinite(parsed) || parsed <= 0) return DEFAULT_TOKEN_TTL_SECONDS;
   return parsed;
 }
 
-export function createStringeeAccessToken(userId: string): string {
-  const apiSid = process.env.STRINGEE_API_SID;
-  const apiSecret = process.env.STRINGEE_API_SECRET;
+export function createStringeeAccessToken(userId: string, config?: StringeeCredentialConfig): string {
+  const apiSid = resolveApiSid(config);
+  const apiSecret = resolveApiSecret(config);
 
   if (!apiSid || !apiSecret) {
     throw new Error('Stringee credentials are not configured');
@@ -48,7 +76,7 @@ export function createStringeeAccessToken(userId: string): string {
   const payload = {
     jti: `${apiSid}-${crypto.randomUUID()}`,
     iss: apiSid,
-    exp: now + getStringeeTokenTtlSeconds(),
+    exp: now + getStringeeTokenTtlSeconds(config),
     userId,
     // Required for PCC (Programmable Contact Center) routing.
     // Without this, calls fail with CALL_NOT_ALLOWED_BY_YOUR_SERVER
@@ -74,9 +102,9 @@ export function createStringeeAccessToken(userId: string): string {
 
 // REST API token for server-to-server calls (e.g. PCC callout endpoint).
 // Uses `rest_api: true` instead of `userId`, and is short-lived.
-export function createStringeeRestApiToken(ttlSeconds = 60): string {
-  const apiSid = process.env.STRINGEE_API_SID;
-  const apiSecret = process.env.STRINGEE_API_SECRET;
+export function createStringeeRestApiToken(ttlSeconds = 60, config?: StringeeCredentialConfig): string {
+  const apiSid = resolveApiSid(config);
+  const apiSecret = resolveApiSecret(config);
   if (!apiSid || !apiSecret) throw new Error('Stringee credentials are not configured');
 
   const now = Math.floor(Date.now() / 1000);

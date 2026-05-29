@@ -18,6 +18,7 @@ import tagsRoutes from './modules/calls/tags.routes';
 import followUpsRoutes from './modules/follow-ups/followUps.routes';
 import agentRoutes from './modules/agent/agent.routes';
 import stringeeRoutes from './modules/stringee/stringee.routes';
+import stringeePortalConfigsRoutes from './modules/stringee/stringeePortalConfigs.routes';
 import { startLeadUploadWorker } from './jobs/leadUpload.worker';
 import { startFollowUpReminderJob } from './jobs/followUpReminder.job';
 import { verifyAccessToken } from './lib/jwt';
@@ -184,6 +185,7 @@ app.use('/api/tags', tagsRoutes);
 app.use('/api/follow-ups', followUpsRoutes);
 app.use('/api/agent', agentRoutes);
 app.use('/api/stringee', stringeeRoutes);
+app.use('/api/stringee-portals', stringeePortalConfigsRoutes);
 // TODO (Task 2.x): app.use('/api/analytics', analyticsRoutes);
 
 // ── Static Frontend Serving (Unified Deployment) ───────────────────────

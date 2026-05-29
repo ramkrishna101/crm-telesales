@@ -4,10 +4,11 @@ import bcrypt from 'bcryptjs';
 import { prisma } from '../../lib/prisma';
 import { authenticate, requireRole } from '../../middleware/auth';
 import { AppError } from '../../middleware/errorHandler';
-import { isStringeeXAdminConfigured, resolveStringeeAccountIdByEmail } from '../../lib/stringeexAdmin';
 import { revokeAllRefreshTokens } from '../../lib/redis';
 import { param } from '../../lib/params';
 import { ADMIN_ROLES, assertBranchAccess, getUserBranchId, isSuperAdmin, resolveBranchId } from '../../lib/access';
+import { resolveAssignedStringeePortalForUser, resolveStringeePortalAssignmentId, resolveStringeePortalSecrets } from '../../lib/stringeePortalConfig';
+import { hasStringeeXPortalAdminConfig, resolveStringeeAccountIdByEmailForPortal } from '../../lib/stringeexPortalAdmin';
 
 const router = Router();
 router.use(authenticate);
@@ -19,6 +20,7 @@ const createUserSchema = z.object({
   email: z.string().email().max(255),
   stringeeEmail: z.string().email().max(255).optional().nullable(),
   stringeeAccountId: z.string().min(1).max(64).optional().nullable(),
+  stringeePortalConfigId: z.string().uuid().optional().nullable(),
   password: z.string().min(8).max(128),
   role: z.enum(['branch_admin', 'supervisor', 'agent']),
   branchId: z.string().uuid().optional(),
@@ -33,6 +35,7 @@ const updateUserSchema = z.object({
   email: z.string().email().max(255).optional(),
   stringeeEmail: z.string().email().max(255).optional().nullable(),
   stringeeAccountId: z.string().min(1).max(64).optional().nullable(),
+  stringeePortalConfigId: z.string().uuid().optional().nullable(),
   password: z.string().min(8).max(128).optional(),
   role: z.enum(['branch_admin', 'supervisor', 'agent']).optional(),
   teamId: z.string().min(1).max(64).optional().nullable(),
@@ -77,9 +80,11 @@ router.get('/', async (req: Request, res: Response, next: NextFunction) => {
         select: {
           id: true, name: true, email: true, role: true,
           stringeeEmail: true, stringeeAccountId: true,
+          stringeePortalConfigId: true,
           status: true, teamId: true, createdAt: true,
           branch: { select: { id: true, name: true } },
           team: { select: { id: true, name: true } },
+          stringeePortalConfig: { select: { id: true, portalName: true } },
         },
       }),
       prisma.user.count({ where: filter }),
@@ -101,8 +106,10 @@ router.get('/:id', requireRole(...ADMIN_ROLES, 'supervisor'), async (req: Reques
       select: {
         id: true, name: true, email: true, role: true,
         stringeeEmail: true, stringeeAccountId: true,
+        stringeePortalConfigId: true,
         branchId: true, status: true, teamId: true, createdAt: true, updatedAt: true,
         team: { select: { id: true, name: true } },
+        stringeePortalConfig: { select: { id: true, portalName: true } },
       },
     });
     if (!user) throw new AppError(404, 'USER_NOT_FOUND', 'User not found');
@@ -135,13 +142,38 @@ router.post('/', requireRole(...ADMIN_ROLES), async (req: Request, res: Response
     }
 
     const passwordHash = await bcrypt.hash(body.password, 12);
+    const stringeePortalConfigId = await resolveStringeePortalAssignmentId(branchId, body.stringeePortalConfigId);
 
-    // Auto-resolve Stringee account_id from email if admin portal is
-    // configured and admin did not supply one (Zoho-style behaviour).
     let resolvedAccountId = body.stringeeAccountId?.trim() || null;
-    if (!resolvedAccountId && body.stringeeEmail && isStringeeXAdminConfigured()) {
+    if (!resolvedAccountId && body.stringeeEmail && stringeePortalConfigId) {
       try {
-        resolvedAccountId = await resolveStringeeAccountIdByEmail(body.stringeeEmail);
+        const portal = await prisma.stringeePortalConfig.findUnique({
+          where: { id: stringeePortalConfigId },
+          select: {
+            id: true,
+            branchId: true,
+            portalName: true,
+            tenant: true,
+            apiSidEnc: true,
+            apiSecretEnc: true,
+            adminEmailEnc: true,
+            adminPasswordEnc: true,
+            createdAt: true,
+            updatedAt: true,
+          },
+        });
+        if (portal) {
+          const portalSecrets = resolveStringeePortalSecrets(portal);
+          const resolvedPortal = {
+            portalConfigId: portal.id,
+            tenant: portal.tenant,
+            adminEmail: portalSecrets.adminEmail,
+            adminPassword: portalSecrets.adminPassword,
+          };
+          if (hasStringeeXPortalAdminConfig(resolvedPortal)) {
+            resolvedAccountId = await resolveStringeeAccountIdByEmailForPortal(body.stringeeEmail, resolvedPortal);
+          }
+        }
       } catch (err) {
         console.warn('[stringeex] auto-resolve on create failed:', (err as Error).message);
       }
@@ -153,6 +185,7 @@ router.post('/', requireRole(...ADMIN_ROLES), async (req: Request, res: Response
         email: body.email,
         stringeeEmail: body.stringeeEmail || null,
         stringeeAccountId: resolvedAccountId,
+        stringeePortalConfigId,
         passwordHash,
         role: body.role,
         branchId,
@@ -164,11 +197,13 @@ router.post('/', requireRole(...ADMIN_ROLES), async (req: Request, res: Response
         email: true,
         stringeeEmail: true,
         stringeeAccountId: true,
+        stringeePortalConfigId: true,
         role: true,
         branchId: true,
         status: true,
         teamId: true,
         createdAt: true,
+        stringeePortalConfig: { select: { id: true, portalName: true } },
       },
     });
     res.status(201).json({ success: true, data: user });
@@ -206,20 +241,57 @@ router.put('/:id', requireRole(...ADMIN_ROLES), async (req: Request, res: Respon
     if (body.stringeeEmail !== undefined) {
       updateData.stringeeEmail = body.stringeeEmail || null;
     }
+    const effectiveStringeeEmail = body.stringeeEmail !== undefined
+      ? body.stringeeEmail || null
+      : existing.stringeeEmail;
+    const nextPortalConfigId = body.stringeePortalConfigId !== undefined
+      ? await resolveStringeePortalAssignmentId(existing.branchId || '', body.stringeePortalConfigId)
+      : existing.stringeePortalConfigId;
+    const portalChanged = nextPortalConfigId !== existing.stringeePortalConfigId;
+    if (body.stringeePortalConfigId !== undefined) {
+      updateData.stringeePortalConfigId = nextPortalConfigId;
+    }
     if (body.stringeeAccountId !== undefined) {
       const explicitId = body.stringeeAccountId?.trim() || null;
       const emailChanged =
         body.stringeeEmail !== undefined &&
         (body.stringeeEmail || null) !== existing.stringeeEmail &&
         body.stringeeEmail;
-      if (!explicitId && emailChanged && isStringeeXAdminConfigured()) {
-        // Email newly set/changed and no explicit account ID — auto-resolve.
+      if (!explicitId && (emailChanged || portalChanged) && effectiveStringeeEmail && nextPortalConfigId) {
         try {
-          updateData.stringeeAccountId = await resolveStringeeAccountIdByEmail(body.stringeeEmail as string);
+          const portal = await prisma.stringeePortalConfig.findUnique({
+            where: { id: nextPortalConfigId },
+            select: {
+              id: true,
+              branchId: true,
+              portalName: true,
+              tenant: true,
+              apiSidEnc: true,
+              apiSecretEnc: true,
+              adminEmailEnc: true,
+              adminPasswordEnc: true,
+              createdAt: true,
+              updatedAt: true,
+            },
+          });
+          if (portal) {
+            const portalSecrets = resolveStringeePortalSecrets(portal);
+            const resolvedPortal = {
+              portalConfigId: portal.id,
+              tenant: portal.tenant,
+              adminEmail: portalSecrets.adminEmail,
+              adminPassword: portalSecrets.adminPassword,
+            };
+            if (hasStringeeXPortalAdminConfig(resolvedPortal)) {
+              updateData.stringeeAccountId = await resolveStringeeAccountIdByEmailForPortal(body.stringeeEmail as string, resolvedPortal);
+            }
+          }
         } catch (err) {
           console.warn('[stringeex] auto-resolve on update failed:', (err as Error).message);
           updateData.stringeeAccountId = null;
         }
+      } else if (!explicitId && portalChanged) {
+        updateData.stringeeAccountId = null;
       } else {
         updateData.stringeeAccountId = explicitId;
       }
@@ -241,10 +313,12 @@ router.put('/:id', requireRole(...ADMIN_ROLES), async (req: Request, res: Respon
         email: true,
         stringeeEmail: true,
         stringeeAccountId: true,
+        stringeePortalConfigId: true,
         role: true,
         status: true,
         teamId: true,
         updatedAt: true,
+        stringeePortalConfig: { select: { id: true, portalName: true } },
       },
     });
     res.json({ success: true, data: user });
@@ -294,13 +368,6 @@ router.post('/:id/reset-password', requireRole(...ADMIN_ROLES, 'supervisor'), as
 
 router.post('/:id/sync-stringee', requireRole(...ADMIN_ROLES), async (req: Request, res: Response, next: NextFunction) => {
   try {
-    if (!isStringeeXAdminConfigured()) {
-      throw new AppError(
-        503,
-        'STRINGEEX_ADMIN_NOT_CONFIGURED',
-        'Set STRINGEEX_TENANT / STRINGEEX_ADMIN_EMAIL / STRINGEEX_ADMIN_PASSWORD on the backend to enable auto-sync',
-      );
-    }
     const id = param(req, 'id');
     const target = await prisma.user.findUnique({
       where: { id },
@@ -314,8 +381,15 @@ router.post('/:id/sync-stringee', requireRole(...ADMIN_ROLES), async (req: Reque
 
     let accountId: string | null = null;
     try {
-      accountId = await resolveStringeeAccountIdByEmail(target.stringeeEmail);
+      const portal = await resolveAssignedStringeePortalForUser(target.id);
+      accountId = await resolveStringeeAccountIdByEmailForPortal(target.stringeeEmail, {
+        portalConfigId: portal.id,
+        tenant: portal.tenant,
+        adminEmail: portal.adminEmail,
+        adminPassword: portal.adminPassword,
+      });
     } catch (err: any) {
+      if (err instanceof AppError) throw err;
       throw new AppError(502, 'STRINGEEX_SYNC_FAILED', err.message || 'StringeeX lookup failed');
     }
 
@@ -330,7 +404,7 @@ router.post('/:id/sync-stringee', requireRole(...ADMIN_ROLES), async (req: Reque
     const user = await prisma.user.update({
       where: { id },
       data: { stringeeAccountId: accountId },
-      select: { id: true, stringeeEmail: true, stringeeAccountId: true },
+      select: { id: true, stringeeEmail: true, stringeeAccountId: true, stringeePortalConfigId: true, stringeePortalConfig: { select: { id: true, portalName: true } } },
     });
     res.json({ success: true, data: user });
   } catch (err) {

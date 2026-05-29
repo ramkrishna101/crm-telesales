@@ -6,38 +6,46 @@ import {
   createStringeeAccessToken,
   getStringeeServerAddrs,
   getStringeeTokenTtlSeconds,
-  isStringeeEnabled,
 } from '../../lib/stringee';
-import { isStringeeXAdminConfigured, listStringeeXNumbers, pccProxy } from '../../lib/stringeexAdmin';
+import { listStringeeXNumbersForPortal, pccProxyForPortal } from '../../lib/stringeexPortalAdmin';
 import { z } from 'zod';
+import { resolveAssignedStringeePortalForUser } from '../../lib/stringeePortalConfig';
 
 const router = Router();
 
 router.use(authenticate);
 router.use(requireRole('super_admin', 'branch_admin', 'agent'));
 
-router.get('/config', (_req: Request, res: Response) => {
-  res.json({
-    success: true,
-    data: {
-      enabled: isStringeeEnabled(),
-      serverAddrs: getStringeeServerAddrs(),
-      tokenTtlSeconds: getStringeeTokenTtlSeconds(),
-    },
-  });
+router.get('/config', async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const portal = await resolveAssignedStringeePortalForUser(req.user!.userId);
+    res.json({
+      success: true,
+      data: {
+        enabled: true,
+        serverAddrs: getStringeeServerAddrs(),
+        tokenTtlSeconds: getStringeeTokenTtlSeconds(),
+        portal: { id: portal.id, portalName: portal.portalName },
+      },
+    });
+  } catch (err) {
+    next(err);
+  }
 });
 
 // ── GET /api/stringee/numbers ─────────────────────────────────────────
 // Returns the ordered list of hotlines (StringeeX numbers) the agent's
 // SDK may dial from. Browser iterates and retries through them when
 // CALL_NOT_ALLOWED_BY_YOUR_SERVER comes back, matching the Zoho widget pattern.
-router.get('/numbers', async (_req: Request, res: Response, next: NextFunction) => {
+router.get('/numbers', async (req: Request, res: Response, next: NextFunction) => {
   try {
-    if (!isStringeeXAdminConfigured()) {
-      throw new AppError(503, 'STRINGEEX_ADMIN_NOT_CONFIGURED', 'Stringee number sync is not configured');
-    }
-
-    const hotlines = await listStringeeXNumbers(true);
+    const portal = await resolveAssignedStringeePortalForUser(req.user!.userId);
+    const hotlines = await listStringeeXNumbersForPortal({
+      portalConfigId: portal.id,
+      tenant: portal.tenant,
+      adminEmail: portal.adminEmail,
+      adminPassword: portal.adminPassword,
+    }, true);
     if (!hotlines.length) {
       throw new AppError(503, 'STRINGEE_NUMBERS_UNAVAILABLE', 'No number available');
     }
@@ -53,10 +61,6 @@ router.get('/numbers', async (_req: Request, res: Response, next: NextFunction) 
 
 router.get('/token', async (req: Request, res: Response, next: NextFunction) => {
   try {
-    if (!isStringeeEnabled()) {
-      throw new AppError(503, 'STRINGEE_DISABLED', 'Stringee integration is disabled');
-    }
-
     const user = await prisma.user.findUnique({
       where: { id: req.user!.userId },
       select: { id: true, email: true, stringeeEmail: true, stringeeAccountId: true, status: true, role: true },
@@ -75,7 +79,11 @@ router.get('/token', async (req: Request, res: Response, next: NextFunction) => 
     }
 
     const stringeeUserId = user.stringeeEmail;
-    const token = createStringeeAccessToken(stringeeUserId);
+    const portal = await resolveAssignedStringeePortalForUser(user.id);
+    const token = createStringeeAccessToken(stringeeUserId, {
+      apiSid: portal.apiSid,
+      apiSecret: portal.apiSecret,
+    });
     res.json({
       success: true,
       data: {
@@ -138,10 +146,6 @@ router.post('/profile', async (req: Request, res: Response, next: NextFunction) 
 
 router.post('/agent-token', async (req: Request, res: Response, next: NextFunction) => {
   try {
-    if (!isStringeeEnabled()) {
-      throw new AppError(503, 'STRINGEE_DISABLED', 'Stringee integration is disabled');
-    }
-
     const user = await prisma.user.findUnique({
       where: { id: req.user!.userId },
       select: { id: true, stringeeEmail: true, stringeeAccountId: true, status: true },
@@ -161,7 +165,11 @@ router.post('/agent-token', async (req: Request, res: Response, next: NextFuncti
 
     let authToken: string;
     try {
-      authToken = createStringeeAccessToken(user.stringeeAccountId);
+      const portal = await resolveAssignedStringeePortalForUser(user.id);
+      authToken = createStringeeAccessToken(user.stringeeAccountId, {
+        apiSid: portal.apiSid,
+        apiSecret: portal.apiSecret,
+      });
     } catch (err: any) {
       throw new AppError(500, 'STRINGEE_TOKEN_MINT_FAILED', err.message || 'Token mint failed');
     }
@@ -194,10 +202,6 @@ const calloutSchema = z.object({
 
 router.post('/callout', async (req: Request, res: Response, next: NextFunction) => {
   try {
-    if (!isStringeeEnabled()) {
-      throw new AppError(503, 'STRINGEE_DISABLED', 'Stringee integration is disabled');
-    }
-
     const body = calloutSchema.parse(req.body);
 
     const user = await prisma.user.findUnique({
@@ -210,7 +214,13 @@ router.post('/callout', async (req: Request, res: Response, next: NextFunction) 
       throw new AppError(400, 'STRINGEE_ACCOUNT_ID_REQUIRED', 'Agent has no Stringee Account ID');
     }
 
-    const hotlines = await listStringeeXNumbers(true);
+    const portal = await resolveAssignedStringeePortalForUser(user.id);
+    const hotlines = await listStringeeXNumbersForPortal({
+      portalConfigId: portal.id,
+      tenant: portal.tenant,
+      adminEmail: portal.adminEmail,
+      adminPassword: portal.adminPassword,
+    }, true);
     const hotline = hotlines[0];
     if (!hotline) throw new AppError(503, 'STRINGEE_NUMBERS_UNAVAILABLE', 'No number available');
 
@@ -242,7 +252,12 @@ router.post('/callout', async (req: Request, res: Response, next: NextFunction) 
 
     let json: any;
     try {
-      json = await pccProxy('v1/call/callout', 'POST', payload);
+      json = await pccProxyForPortal({
+        portalConfigId: portal.id,
+        tenant: portal.tenant,
+        adminEmail: portal.adminEmail,
+        adminPassword: portal.adminPassword,
+      }, 'v1/call/callout', 'POST', payload);
     } catch (err: any) {
       console.error('[stringee.callout] pccProxy threw', err?.message || err);
       throw new AppError(502, 'STRINGEE_CALLOUT_FAILED', err?.message || 'Callout failed');

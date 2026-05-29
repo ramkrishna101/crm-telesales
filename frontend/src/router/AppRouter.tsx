@@ -26,6 +26,7 @@ import LeadsPage from '../pages/admin/LeadsPage';
 import TagsPage from '../pages/admin/TagsPage';
 import AnalyticsPage from '../pages/admin/AnalyticsPage';
 import BranchesPage from '../pages/admin/BranchesPage';
+import ConfigurationPage from '../pages/admin/ConfigurationPage';
 
 // Supervisor
 import SupervisorDashboard from '../pages/supervisor/SupervisorDashboard';
@@ -61,6 +62,7 @@ export default function AppRouter() {
 
       <Route element={<RoleRoute allowedRoles={['super_admin', 'branch_admin']} />}>
         <Route path="/admin" element={<AdminDashboard />} />
+        <Route path="/admin/configuration" element={<ConfigurationPage />} />
         <Route path="/admin/users" element={<UsersPage />} />
         <Route path="/admin/teams" element={<TeamsPage />} />
         <Route path="/admin/campaigns" element={<CampaignsPage />} />

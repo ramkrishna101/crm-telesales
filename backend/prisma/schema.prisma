@@ -78,6 +78,7 @@ model Branch {
   updatedAt     DateTime     @updatedAt
 
   users         User[]
+  stringeePortalConfigs StringeePortalConfig[]
   teams         Team[]
   campaigns     Campaign[]
   leads         Lead[]
@@ -109,6 +110,8 @@ model User {
   stringeeEmail  String?    @unique
   stringeeAccountId String? @unique
   stringeePasswordEnc String?
+  stringeePortalConfig   StringeePortalConfig? @relation(fields: [stringeePortalConfigId], references: [id])
+  stringeePortalConfigId String?
   passwordHash   String
   role           Role
   branch         Branch?    @relation(fields: [branchId], references: [id])
@@ -136,6 +139,26 @@ model User {
   comments          LeadComment[]
 
   @@map("users")
+}
+
+model StringeePortalConfig {
+  id               String   @id @default(uuid())
+  branch           Branch   @relation(fields: [branchId], references: [id])
+  branchId         String
+  portalName       String
+  apiSidEnc        String
+  apiSecretEnc     String
+  tenant           String
+  adminEmailEnc    String
+  adminPasswordEnc String
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  users            User[]
+
+  @@unique([branchId, portalName])
+  @@index([branchId])
+  @@map("stringee_portal_configs")
 }
 
 model Campaign {

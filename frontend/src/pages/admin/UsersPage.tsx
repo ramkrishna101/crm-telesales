@@ -1,8 +1,9 @@
 import { useEffect, useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { usersService, teamsService } from '../../services/crm.service';
+import { usersService, teamsService, stringeePortalConfigsService } from '../../services/crm.service';
 import AppLayout from '../../components/layout/AppLayout';
 import ConfirmDialog from '../../components/ui/ConfirmDialog';
+import { useAuthStore } from '../../store/authStore';
 import toast from 'react-hot-toast';
 import { Plus, RefreshCw, Search, UserX, UserCheck, Edit2, X, Key, Clock, Trash2 } from 'lucide-react';
 
@@ -15,23 +16,31 @@ interface User {
   id: string; name: string; email: string;
   stringeeEmail?: string | null;
   stringeeAccountId?: string | null;
+  stringeePortalConfigId?: string | null;
+  stringeePortalConfig?: { id: string; portalName: string } | null;
   role: UserRole; status: UserStatus; teamId: string | null;
   branch?: { id: string; name: string } | null;
   team?: { id: string; name: string } | null; createdAt: string;
 }
 interface Team { id: string; name: string; }
+interface PortalConfig { id: string; portalName: string; }
 
 // ── Modal ─────────────────────────────────────────────────────────────
 
 function UserModal({
-  user, teams, onClose, onSave,
-}: { user?: User | null; teams: Team[]; onClose: () => void; onSave: (data: Record<string, unknown>) => void; }) {
+  user, teams, branchId, onClose, onSave,
+}: { user?: User | null; teams: Team[]; branchId?: string | null; onClose: () => void; onSave: (data: Record<string, unknown>) => void; }) {
   const isEdit = !!user;
   const qc = useQueryClient();
+  const authBranchId = useAuthStore((state) => state.user?.branchId || null);
+  const effectiveBranchId = user?.branch?.id || branchId || authBranchId;
+  const initialStringeeEmail = user?.stringeeEmail || '';
+  const initialPortalConfigId = user?.stringeePortalConfigId || user?.stringeePortalConfig?.id || '';
   const [form, setForm] = useState({
     name: user?.name || '',
     email: user?.email || '',
     stringeeEmail: user?.stringeeEmail || '',
+    stringeePortalConfigId: user?.stringeePortalConfigId || user?.stringeePortalConfig?.id || '',
     password: '',
     role: user?.role || 'agent' as UserRole,
     teamId: user?.teamId || '',
@@ -40,6 +49,20 @@ function UserModal({
   });
 
   const set = (k: string, v: string) => setForm((f) => ({ ...f, [k]: v }));
+
+  const { data: portalsData } = useQuery({
+    queryKey: ['stringee-portals', effectiveBranchId],
+    queryFn: () => stringeePortalConfigsService.list(effectiveBranchId ? { branchId: effectiveBranchId } : undefined),
+    enabled: Boolean(effectiveBranchId),
+  });
+
+  const portals: PortalConfig[] = portalsData?.data?.data || [];
+
+  useEffect(() => {
+    if (!form.stringeePortalConfigId && portals.length === 1) {
+      set('stringeePortalConfigId', portals[0].id);
+    }
+  }, [form.stringeePortalConfigId, portals]);
 
   const syncMutation = useMutation({
     mutationFn: () => usersService.syncStringee(user!.id),
@@ -75,6 +98,7 @@ function UserModal({
           onSave({
             name: form.name, email: form.email, stringeeEmail: form.stringeeEmail || null, role: form.role,
             teamId: form.teamId || null, status: form.status,
+            stringeePortalConfigId: form.stringeePortalConfigId || null,
             stringeeAccountId: form.stringeeAccountId.trim() || null,
             ...(form.password ? { password: form.password } : {}),
           });
@@ -94,7 +118,40 @@ function UserModal({
             </div>
             <div className="form-group">
               <label className="form-label">Stringee Email</label>
-              <input className="form-input" type="email" value={form.stringeeEmail} onChange={(e) => set('stringeeEmail', e.target.value)} placeholder="agent-stringee@company.com" />
+              <input
+                className="form-input"
+                type="email"
+                value={form.stringeeEmail}
+                onChange={(e) => setForm((current) => ({
+                  ...current,
+                  stringeeEmail: e.target.value,
+                  stringeeAccountId: isEdit && e.target.value !== initialStringeeEmail ? '' : current.stringeeAccountId,
+                }))}
+                placeholder="agent-stringee@company.com"
+              />
+            </div>
+            <div className="form-group">
+              <label className="form-label">Portal</label>
+              <select
+                className="form-input"
+                value={form.stringeePortalConfigId}
+                onChange={(e) => setForm((current) => ({
+                  ...current,
+                  stringeePortalConfigId: e.target.value,
+                  stringeeAccountId: isEdit && e.target.value !== initialPortalConfigId ? '' : current.stringeeAccountId,
+                }))}
+                disabled={!effectiveBranchId || portals.length === 0}
+              >
+                <option value="">{portals.length ? 'Select portal' : 'No portal configured'}</option>
+                {portals.map((portal) => <option key={portal.id} value={portal.id}>{portal.portalName}</option>)}
+              </select>
+              <div style={{ fontSize: 11, color: '#666', marginTop: 4 }}>
+                {portals.length
+                  ? portals.length === 1
+                    ? 'The only configured portal is selected by default.'
+                    : 'Choose which Stringee portal this user belongs to.'
+                  : 'No branch portal configured yet. Dialing will show No dialer available.'}
+              </div>
             </div>
             <div className="form-group">
               <label className="form-label">Stringee Account ID</label>
@@ -120,7 +177,7 @@ function UserModal({
                   <button
                     type="button"
                     className="btn btn-secondary"
-                    disabled={!form.stringeeEmail || syncMutation.isPending}
+                    disabled={!form.stringeeEmail || !form.stringeePortalConfigId || syncMutation.isPending}
                     onClick={() => syncMutation.mutate()}
                     title="Re-fetch this user's account_id from StringeeX"
                   >
@@ -287,6 +344,7 @@ function BreakHistoryModal({
 
 export default function UsersPage() {
   const qc = useQueryClient();
+  const authUser = useAuthStore((state) => state.user);
   const [search, setSearch] = useState('');
   const [roleFilter, setRoleFilter] = useState('');
   const [page, setPage] = useState(1);
@@ -427,6 +485,7 @@ export default function UsersPage() {
                   <div style={{ fontWeight: 600, color: 'var(--text-primary)' }}>{u.name}</div>
                   <div style={{ fontSize: '0.76rem', color: 'var(--text-muted)' }}>{u.email}</div>
                   {u.stringeeEmail && <div style={{ fontSize: '0.74rem', color: 'var(--text-secondary)' }}>Stringee: {u.stringeeEmail}</div>}
+                  {u.stringeePortalConfig?.portalName && <div style={{ fontSize: '0.74rem', color: 'var(--text-secondary)' }}>Portal: {u.stringeePortalConfig.portalName}</div>}
                   {u.stringeeAccountId && <div style={{ fontSize: '0.74rem', color: 'var(--text-secondary)' }}>Account ID: {u.stringeeAccountId}</div>}
                 </div>
               </div>
@@ -496,6 +555,7 @@ export default function UsersPage() {
         <UserModal
           user={editUser}
           teams={teams}
+          branchId={editUser?.branch?.id || authUser?.branchId || null}
           onClose={() => { setShowCreate(false); setEditUser(null); }}
           onSave={(data) => {
             if (editUser) updateMutation.mutate({ id: editUser.id, data });

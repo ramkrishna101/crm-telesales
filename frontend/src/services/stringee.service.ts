@@ -531,7 +531,12 @@ class StringeeService {
     // Reuse the most recent in-flight summary if we have one for the same lead,
     // otherwise synthesise a stub so the modal has the fields it needs.
     const summary: LastCallSummary = lastCall && lastCall.leadId === activeLeadId
-      ? lastCall
+      ? {
+          ...lastCall,
+          leadName: lastCall.leadName || activeLeadName,
+          phone: lastCall.phone || activePhone,
+          fromNumber: lastCall.fromNumber || selectedHotline,
+        }
       : {
           leadId: activeLeadId,
           leadName: activeLeadName,
