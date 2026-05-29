@@ -1,4 +1,5 @@
 import { useState, useSyncExternalStore, useEffect } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { leadsService, callsService, tagsService } from '../../services/crm.service';
 import AppLayout from '../../components/layout/AppLayout';
@@ -6,7 +7,7 @@ import { useIsMobile } from '../../hooks/useIsMobile';
 import Dropdown from '../../components/ui/Dropdown';
 import { 
   Search, User, Phone, Calendar, MessageSquare, 
-  ExternalLink, ChevronLeft, ChevronRight, Mail, Hash, Clock, History, PhoneCall, SlidersHorizontal
+  ExternalLink, ChevronLeft, ChevronRight, Mail, Hash, Clock, History, PhoneCall, SlidersHorizontal, Languages, FileText
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { stringeeService } from '../../services/stringee.service';
@@ -21,6 +22,9 @@ interface Lead {
   createdAt: string;
   lastCalledAt: string | null;
   lastCallResult: string | null;
+  lastCallLanguage?: string | null;
+  lastCallDescription?: string | null;
+  campaignId?: string | null;
   campaign?: { name: string };
 }
 
@@ -74,16 +78,21 @@ const RESULT_COLORS: Record<string, { bg: string; fg: string }> = {
 
 export default function AgentLeadsPage() {
   const isMobile = useIsMobile();
+  const navigate = useNavigate();
   const [searchTerm, setSearchTerm] = useState('');
   const [debouncedSearch, setDebouncedSearch] = useState('');
   // Draft state — bound to the dropdowns. Not used for querying.
   const [draftStatus, setDraftStatus] = useState('');
   const [draftPriority, setDraftPriority] = useState('');
   const [draftCallResult, setDraftCallResult] = useState('');
+  const [draftCampaignId, setDraftCampaignId] = useState('');
+  const [draftCampaignLabel, setDraftCampaignLabel] = useState('');
   // Applied state — committed on Apply click; this is what drives the query.
   const [statusFilter, setStatusFilter] = useState('');
   const [priorityFilter, setPriorityFilter] = useState('');
   const [callResultFilter, setCallResultFilter] = useState('');
+  const [campaignFilter, setCampaignFilter] = useState('');
+  const [campaignFilterLabel, setCampaignFilterLabel] = useState('');
   const [page, setPage] = useState(1);
   const PAGE_SIZE = 20;
   const [selectedLeadId, setSelectedLeadId] = useState<string | null>(null);
@@ -93,24 +102,36 @@ export default function AgentLeadsPage() {
   const hasUnapplied =
     draftStatus !== statusFilter ||
     draftPriority !== priorityFilter ||
-    draftCallResult !== callResultFilter;
+    draftCallResult !== callResultFilter ||
+    draftCampaignId !== campaignFilter;
 
   const hasActiveFilters =
-    !!(statusFilter || priorityFilter || callResultFilter || draftStatus || draftPriority || draftCallResult);
+    !!(statusFilter || priorityFilter || callResultFilter || campaignFilter || draftStatus || draftPriority || draftCallResult || draftCampaignId);
+
+  const updateDraftCampaign = (value: string, label?: string) => {
+    setDraftCampaignId(value);
+    setDraftCampaignLabel(value ? (label || draftCampaignLabel || campaignFilterLabel || 'Selected campaign') : '');
+  };
 
   const applyFilters = () => {
     setStatusFilter(draftStatus);
     setPriorityFilter(draftPriority);
     setCallResultFilter(draftCallResult);
+    setCampaignFilter(draftCampaignId);
+    setCampaignFilterLabel(draftCampaignId ? (draftCampaignLabel || campaignFilterLabel || 'Selected campaign') : '');
   };
 
   const resetFilters = () => {
     setDraftStatus('');
     setDraftPriority('');
     setDraftCallResult('');
+    setDraftCampaignId('');
+    setDraftCampaignLabel('');
     setStatusFilter('');
     setPriorityFilter('');
     setCallResultFilter('');
+    setCampaignFilter('');
+    setCampaignFilterLabel('');
   };
 
   // Debounce the search input so we don't hammer the server on every keystroke.
@@ -122,10 +143,10 @@ export default function AgentLeadsPage() {
   // Reset to page 1 whenever filters/search change.
   useEffect(() => {
     setPage(1);
-  }, [debouncedSearch, statusFilter, priorityFilter, callResultFilter]);
+  }, [debouncedSearch, statusFilter, priorityFilter, callResultFilter, campaignFilter]);
 
   const { data, isLoading, isFetching } = useQuery({
-    queryKey: ['agent-leads', statusFilter, priorityFilter, callResultFilter, debouncedSearch, page],
+    queryKey: ['agent-leads', statusFilter, priorityFilter, callResultFilter, campaignFilter, debouncedSearch, page],
     queryFn: () =>
       leadsService.list({
         page,
@@ -133,6 +154,7 @@ export default function AgentLeadsPage() {
         ...(statusFilter ? { status: statusFilter } : {}),
         ...(priorityFilter ? { priority: priorityFilter } : {}),
         ...(callResultFilter ? { callResult: callResultFilter } : {}),
+        ...(campaignFilter ? { campaignId: campaignFilter } : {}),
         ...(debouncedSearch ? { q: debouncedSearch } : {}),
       }),
     placeholderData: (prev) => prev,
@@ -154,6 +176,29 @@ export default function AgentLeadsPage() {
   const rangeStart = total === 0 ? 0 : (page - 1) * PAGE_SIZE + 1;
   const rangeEnd = Math.min(page * PAGE_SIZE, total);
   const filteredLeads = leads;
+  const campaignOptionMap = new Map<string, string>();
+
+  leads.forEach((lead) => {
+    if (lead.campaignId && lead.campaign?.name) {
+      campaignOptionMap.set(lead.campaignId, lead.campaign.name);
+    }
+  });
+
+  const campaignOptions = [
+    { value: '', label: 'All campaigns' },
+    ...Array.from(campaignOptionMap.entries())
+      .sort((left, right) => left[1].localeCompare(right[1]))
+      .map(([value, label]) => ({ value, label })),
+  ];
+
+  if (campaignFilter && !campaignOptionMap.has(campaignFilter)) {
+    campaignOptions.push({ value: campaignFilter, label: campaignFilterLabel || 'Selected campaign' });
+  }
+
+  const handleCampaignChange = (value: string) => {
+    const option = campaignOptions.find((entry) => entry.value === value);
+    updateDraftCampaign(value, option?.label);
+  };
 
   useEffect(() => {
     if (!isMobile) return;
@@ -266,6 +311,18 @@ export default function AgentLeadsPage() {
                     <div className="agent-mobile-detail-row"><MessageSquare size={13} /> <span>{selectedLead.lastCallResult || 'No call result yet'}</span></div>
                   </div>
 
+                  <div className="agent-mobile-detail-grid agent-mobile-detail-grid--split">
+                    <div className="agent-mobile-detail-row"><Languages size={13} /> <span>{selectedLead.lastCallLanguage || 'Language not captured'}</span></div>
+                    <div className="agent-mobile-detail-row"><Calendar size={13} /> <span>{new Date(selectedLead.createdAt).toLocaleDateString()}</span></div>
+                  </div>
+
+                  <div className="agent-mobile-note-preview">
+                    <div className="agent-mobile-note-preview__label"><FileText size={13} /> Last note</div>
+                    <div className="agent-mobile-note-preview__text">
+                      {selectedLead.lastCallDescription || 'No recent notes captured for this lead.'}
+                    </div>
+                  </div>
+
                   <div className="agent-mobile-inline-actions">
                     <button
                       className="btn btn-primary"
@@ -277,8 +334,7 @@ export default function AgentLeadsPage() {
                     <button
                       className="btn btn-secondary"
                       onClick={() => {
-                        setSelectedLeadId(selectedLead.id);
-                        setIsModalOpen(true);
+                        navigate(`/agent/leads/${selectedLead.id}`);
                       }}
                     >
                       <ExternalLink size={14} /> View
@@ -290,7 +346,7 @@ export default function AgentLeadsPage() {
           </section>
 
           {total > PAGE_SIZE && (
-            <section className="card card--mobile">
+            <section className="card card--mobile agent-mobile-pagination-card">
               <div className="agent-mobile-pagination">
                 <div>
                   Page <strong>{page}</strong> of <strong>{totalPages}</strong>
@@ -308,53 +364,84 @@ export default function AgentLeadsPage() {
             <div className="agent-mobile-sheet-backdrop" onClick={() => setIsFilterSheetOpen(false)}>
               <div className="agent-mobile-sheet" onClick={(event) => event.stopPropagation()}>
                 <div className="agent-mobile-sheet__header">
+                  <div className="agent-mobile-sheet__handle" />
+                </div>
+
+                <div className="agent-mobile-sheet__topbar">
                   <div>
-                    <div className="section-eyebrow">Leads filters</div>
-                    <h2 className="card-title">Filter leads</h2>
+                    <div className="agent-mobile-sheet__title">Filters</div>
+                    <div className="agent-mobile-sheet__subtitle">Same filters as desktop agent leads</div>
                   </div>
-                  <button className="btn-icon" onClick={() => setIsFilterSheetOpen(false)}>
-                    <ExternalLink size={14} style={{ transform: 'rotate(45deg)' }} />
+                  <button
+                    type="button"
+                    className="agent-mobile-sheet__reset"
+                    onClick={resetFilters}
+                    disabled={!hasActiveFilters}
+                  >
+                    Reset
                   </button>
                 </div>
 
                 <div className="agent-mobile-sheet__body">
-                  <Dropdown
-                    value={draftStatus}
-                    onChange={setDraftStatus}
-                    placeholder="All followup statuses"
-                    options={FOLLOW_UP_STATUS_OPTIONS.map((option) => ({
-                      value: option.value,
-                      label: option.label,
-                      colour: option.value ? STATUS_COLORS[option.value]?.dot : undefined,
-                    }))}
-                  />
-                  <Dropdown
-                    value={draftCallResult}
-                    onChange={setDraftCallResult}
-                    placeholder="All call results"
-                    options={[
-                      { value: '', label: 'All call results' },
-                      ...dispositionTags.map((tag) => {
-                        const key = tag.name.toLowerCase();
-                        return {
-                          value: tag.name,
-                          label: tag.name,
-                          colour: tag.color || RESULT_COLORS[key]?.fg,
-                        };
-                      }),
-                    ]}
-                  />
-                  <Dropdown
-                    value={draftPriority}
-                    onChange={setDraftPriority}
-                    placeholder="All priorities"
-                    options={PRIORITY_OPTIONS}
-                  />
+                  <div className="agent-mobile-sheet__field">
+                    <div className="agent-mobile-sheet__label">Campaign</div>
+                    <Dropdown
+                      value={draftCampaignId}
+                      onChange={handleCampaignChange}
+                      placeholder="All campaigns"
+                      options={campaignOptions}
+                      height={42}
+                    />
+                  </div>
+                  <div className="agent-mobile-sheet__field">
+                    <div className="agent-mobile-sheet__label">Follow-up status</div>
+                    <Dropdown
+                      value={draftStatus}
+                      onChange={setDraftStatus}
+                      placeholder="All followup statuses"
+                      options={FOLLOW_UP_STATUS_OPTIONS.map((option) => ({
+                        value: option.value,
+                        label: option.label,
+                        colour: option.value ? STATUS_COLORS[option.value]?.dot : undefined,
+                      }))}
+                      height={42}
+                    />
+                  </div>
+                  <div className="agent-mobile-sheet__field">
+                    <div className="agent-mobile-sheet__label">Call result</div>
+                    <Dropdown
+                      value={draftCallResult}
+                      onChange={setDraftCallResult}
+                      placeholder="All call results"
+                      options={[
+                        { value: '', label: 'All call results' },
+                        ...dispositionTags.map((tag) => {
+                          const key = tag.name.toLowerCase();
+                          return {
+                            value: tag.name,
+                            label: tag.name,
+                            colour: tag.color || RESULT_COLORS[key]?.fg,
+                          };
+                        }),
+                      ]}
+                      height={42}
+                    />
+                  </div>
+                  <div className="agent-mobile-sheet__field">
+                    <div className="agent-mobile-sheet__label">Priority</div>
+                    <Dropdown
+                      value={draftPriority}
+                      onChange={setDraftPriority}
+                      placeholder="All priorities"
+                      options={PRIORITY_OPTIONS}
+                      height={42}
+                    />
+                  </div>
                 </div>
 
                 <div className="agent-mobile-sheet__actions">
-                  <button className="btn btn-secondary" onClick={() => { resetFilters(); setIsFilterSheetOpen(false); }} disabled={!hasActiveFilters}>Reset</button>
-                  <button className="btn btn-primary" onClick={() => { applyFilters(); setIsFilterSheetOpen(false); }} disabled={!hasUnapplied}>Apply</button>
+                  <button className="agent-mobile-sheet__cancel" onClick={() => setIsFilterSheetOpen(false)}>Cancel</button>
+                  <button className="agent-mobile-sheet__apply" onClick={() => { applyFilters(); setIsFilterSheetOpen(false); }} disabled={!hasUnapplied}>Apply Filters</button>
                 </div>
               </div>
             </div>
@@ -392,7 +479,7 @@ export default function AgentLeadsPage() {
           <div
             style={{
               display: 'grid',
-              gridTemplateColumns: '1fr 170px 170px 150px auto',
+              gridTemplateColumns: '1fr 170px 170px 170px 150px auto',
               gap: 8,
               marginBottom: 14,
               alignItems: 'center',
@@ -427,6 +514,12 @@ export default function AgentLeadsPage() {
                 }}
               />
             </div>
+            <Dropdown
+              value={draftCampaignId}
+              onChange={handleCampaignChange}
+              placeholder="All campaigns"
+              options={campaignOptions}
+            />
             <Dropdown
               value={draftStatus}
               onChange={setDraftStatus}

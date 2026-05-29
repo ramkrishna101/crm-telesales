@@ -34,6 +34,7 @@ import SupervisorDashboard from '../pages/supervisor/SupervisorDashboard';
 // Agent
 import AgentDashboard from '../pages/agent/AgentDashboard';
 import AgentLeadsPage from '../pages/agent/AgentLeadsPage';
+import AgentLeadProfilePage from '../pages/agent/AgentLeadProfilePage';
 import AgentFollowUpsPage from '../pages/agent/AgentFollowUpsPage';
 import AgentCallsPage from '../pages/agent/AgentCallsPage';
 import AgentProfilePage from '../pages/agent/AgentProfilePage';
@@ -83,6 +84,7 @@ export default function AppRouter() {
       <Route element={<RoleRoute allowedRoles={['agent']} />}>
         <Route path="/agent" element={<AgentViewportBoundary desktop={<AgentDashboard />} />} />
         <Route path="/agent/leads" element={<AgentViewportBoundary desktop={<AgentLeadsPage />} />} />
+        <Route path="/agent/leads/:leadId" element={<AgentViewportBoundary desktop={<AgentLeadsPage />} mobile={<AgentLeadProfilePage />} />} />
         <Route path="/agent/follow-ups" element={<AgentViewportBoundary desktop={<AgentFollowUpsPage />} />} />
         <Route path="/agent/calls" element={<AgentViewportBoundary desktop={<AgentCallsPage />} />} />
         <Route path="/agent/profile" element={<AgentViewportBoundary desktop={<AgentProfilePage />} />} />
