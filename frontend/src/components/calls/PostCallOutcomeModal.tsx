@@ -173,6 +173,93 @@ export default function PostCallOutcomeModal() {
 
   if (!visible || !state.lastCall) return null;
   const lc = state.lastCall;
+  const currentStatus = STATUS_LABELS[liveLead?.status] || { label: liveLead?.status || 'Unknown', bg: '#f1f5f9', fg: '#475569' };
+
+  const callInformationBody = (
+    <Grid mobile={isMobile} mobileColumns={2}>
+      <Field label="Call Start Time" mobile={isMobile} span={2}>
+        <ReadOnly value={formatDateTime(lc.startedAt)} mobile={isMobile} />
+      </Field>
+      <Field label="Call Duration" mobile={isMobile}>
+        <div className={isMobile ? 'agent-mobile-outcome-sheet__duration' : undefined} style={{ display: 'flex', gap: 8 }}>
+          <ReadOnly value={`${pad(minutes)} min`} mobile={isMobile} />
+          <ReadOnly value={`${pad(seconds)} sec`} mobile={isMobile} />
+        </div>
+      </Field>
+      <Field label="Last Call Result" mobile={isMobile}>
+        <ReadOnly value={previousDisposition || (lc.answered ? 'Answered' : 'No Answer')} mobile={isMobile} />
+      </Field>
+      <Field label="Last Call Made On" mobile={isMobile} span={2}>
+        <ReadOnly value={formatShort(lc.endedAt)} mobile={isMobile} />
+      </Field>
+      <Field label="Call End Reason" span={2} mobile={isMobile}>
+        <ReadOnly value={`${lc.answered ? 'USER_END_CALL' : 'NO_ANSWER'} | ${lc.endReason}`} mobile={isMobile} />
+      </Field>
+      <Field label="Last Call Description" span={2} mobile={isMobile}>
+        <ReadOnly value={previousNotes || (lc.answered ? 'Answered' : 'Not answered')} mobile={isMobile} />
+      </Field>
+    </Grid>
+  );
+
+  const outcomeBody = (
+    <Grid mobile={isMobile}>
+      <Field label="Call Result" required mobile={isMobile}>
+        <Dropdown
+          value={dispositionTag}
+          onChange={setDispositionTag}
+          options={tags.map((t) => ({ value: t.name, label: t.name, colour: t.colour }))}
+          placeholder="Select an option"
+          mobile={isMobile}
+        />
+      </Field>
+      <Field label="Language" mobile={isMobile}>
+        <Dropdown
+          value={language}
+          onChange={setLanguage}
+          options={LANGUAGE_OPTIONS.map((l) => ({ value: l, label: l }))}
+          placeholder="Select an option"
+          mobile={isMobile}
+        />
+      </Field>
+      <Field label="Update Followup Status" mobile={isMobile}>
+        <Dropdown
+          value={followupStatus}
+          onChange={setFollowupStatus}
+          options={FOLLOWUP_STATUS_OPTIONS.map((s) => ({ value: s.value, label: s.label }))}
+          placeholder="Keep current"
+          mobile={isMobile}
+        />
+      </Field>
+      <Field label="Next Call Schedule Date" mobile={isMobile}>
+        <div className={isMobile ? 'agent-mobile-outcome-sheet__schedule' : undefined} style={{ display: 'flex', flexDirection: isMobile ? 'column' : 'row', gap: 8 }}>
+          <input
+            type="date"
+            value={followupDate}
+            onChange={(e) => setFollowupDate(e.target.value)}
+            className={isMobile ? 'agent-mobile-outcome-sheet__input' : undefined}
+            style={{ ...inputStyle, flex: 1 }}
+          />
+          <input
+            type="time"
+            value={followupTime}
+            onChange={(e) => setFollowupTime(e.target.value)}
+            className={isMobile ? 'agent-mobile-outcome-sheet__input' : undefined}
+            style={{ ...inputStyle, width: isMobile ? '100%' : 110 }}
+          />
+        </div>
+      </Field>
+      <Field label="Description" span={2} mobile={isMobile}>
+        <textarea
+          value={description}
+          onChange={(e) => setDescription(e.target.value)}
+          placeholder="Enter description..."
+          rows={3}
+          className={isMobile ? 'agent-mobile-outcome-sheet__input agent-mobile-outcome-sheet__textarea' : undefined}
+          style={{ ...inputStyle, resize: 'vertical', minHeight: 70 }}
+        />
+      </Field>
+    </Grid>
+  );
 
   const callInformationSection = (
     <Section
@@ -195,91 +282,13 @@ export default function PostCallOutcomeModal() {
         );
       })()}
     >
-      <Grid mobile={isMobile} mobileColumns={2}>
-        <Field label="Call Start Time" mobile={isMobile} span={2}>
-          <ReadOnly value={formatDateTime(lc.startedAt)} mobile={isMobile} />
-        </Field>
-        <Field label="Call Duration" mobile={isMobile}>
-          <div className={isMobile ? 'agent-mobile-outcome-sheet__duration' : undefined} style={{ display: 'flex', gap: 8 }}>
-            <ReadOnly value={`${pad(minutes)} min`} mobile={isMobile} />
-            <ReadOnly value={`${pad(seconds)} sec`} mobile={isMobile} />
-          </div>
-        </Field>
-        <Field label="Last Call Result" mobile={isMobile}>
-          <ReadOnly value={previousDisposition || (lc.answered ? 'Answered' : 'No Answer')} mobile={isMobile} />
-        </Field>
-        <Field label="Last Call Made On" mobile={isMobile} span={2}>
-          <ReadOnly value={formatShort(lc.endedAt)} mobile={isMobile} />
-        </Field>
-        <Field label="Call End Reason" span={2} mobile={isMobile}>
-          <ReadOnly value={`${lc.answered ? 'USER_END_CALL' : 'NO_ANSWER'} | ${lc.endReason}`} mobile={isMobile} />
-        </Field>
-        <Field label="Last Call Description" span={2} mobile={isMobile}>
-          <ReadOnly value={previousNotes || (lc.answered ? 'Answered' : 'Not answered')} mobile={isMobile} />
-        </Field>
-      </Grid>
+      {callInformationBody}
     </Section>
   );
 
   const outcomeSection = (
     <Section title="Outcome Of Outgoing Call" mobile={isMobile}>
-      <Grid mobile={isMobile}>
-        <Field label="Call Result" required mobile={isMobile}>
-          <Dropdown
-            value={dispositionTag}
-            onChange={setDispositionTag}
-            options={tags.map((t) => ({ value: t.name, label: t.name, colour: t.colour }))}
-            placeholder="Select an option"
-            mobile={isMobile}
-          />
-        </Field>
-        <Field label="Language" mobile={isMobile}>
-          <Dropdown
-            value={language}
-            onChange={setLanguage}
-            options={LANGUAGE_OPTIONS.map((l) => ({ value: l, label: l }))}
-            placeholder="Select an option"
-            mobile={isMobile}
-          />
-        </Field>
-        <Field label="Update Followup Status" mobile={isMobile}>
-          <Dropdown
-            value={followupStatus}
-            onChange={setFollowupStatus}
-            options={FOLLOWUP_STATUS_OPTIONS.map((s) => ({ value: s.value, label: s.label }))}
-            placeholder="Keep current"
-            mobile={isMobile}
-          />
-        </Field>
-        <Field label="Next Call Schedule Date" mobile={isMobile}>
-          <div className={isMobile ? 'agent-mobile-outcome-sheet__schedule' : undefined} style={{ display: 'flex', flexDirection: isMobile ? 'column' : 'row', gap: 8 }}>
-            <input
-              type="date"
-              value={followupDate}
-              onChange={(e) => setFollowupDate(e.target.value)}
-              className={isMobile ? 'agent-mobile-outcome-sheet__input' : undefined}
-              style={{ ...inputStyle, flex: 1 }}
-            />
-            <input
-              type="time"
-              value={followupTime}
-              onChange={(e) => setFollowupTime(e.target.value)}
-              className={isMobile ? 'agent-mobile-outcome-sheet__input' : undefined}
-              style={{ ...inputStyle, width: isMobile ? '100%' : 110 }}
-            />
-          </div>
-        </Field>
-        <Field label="Description" span={2} mobile={isMobile}>
-          <textarea
-            value={description}
-            onChange={(e) => setDescription(e.target.value)}
-            placeholder="Enter description..."
-            rows={3}
-            className={isMobile ? 'agent-mobile-outcome-sheet__input agent-mobile-outcome-sheet__textarea' : undefined}
-            style={{ ...inputStyle, resize: 'vertical', minHeight: 70 }}
-          />
-        </Field>
-      </Grid>
+      {outcomeBody}
     </Section>
   );
 
@@ -309,9 +318,17 @@ export default function PostCallOutcomeModal() {
             {isMobile && (
               <div className="agent-mobile-outcome-sheet__handle" style={{ width: 42, height: 4, borderRadius: 999, background: '#dbe3ef', margin: '0 auto 12px' }} />
             )}
-            <div style={{ fontSize: 11, textTransform: 'uppercase', color: '#94a3b8', fontWeight: 600, letterSpacing: '0.06em' }}>Post Call</div>
-            <div style={{ fontSize: isMobile ? 16 : 18, fontWeight: 700, color: '#0f172a', lineHeight: 1.3 }}>{lc.leadName || 'Lead'} · {lc.phone}</div>
+            <div className={isMobile ? 'agent-mobile-outcome-sheet__eyebrow' : undefined} style={{ fontSize: 11, textTransform: 'uppercase', color: '#94a3b8', fontWeight: 600, letterSpacing: '0.06em' }}>{isMobile ? 'Call Outcome' : 'Post Call'}</div>
+            <div className={isMobile ? 'agent-mobile-outcome-sheet__leadline' : undefined} style={{ fontSize: isMobile ? 16 : 18, fontWeight: 700, color: '#0f172a', lineHeight: 1.3 }}>{lc.leadName || 'Lead'} · {lc.phone}</div>
           </div>
+          {isMobile && (
+            <div
+              className="agent-mobile-outcome-sheet__header-pill"
+              style={{ background: currentStatus.bg, color: currentStatus.fg }}
+            >
+              {currentStatus.label}
+            </div>
+          )}
           <button
             onClick={() => stringeeService.dismissOutcome()}
             style={{ background: 'transparent', border: 'none', color: '#64748b', cursor: 'pointer', padding: 6 }}
@@ -320,11 +337,23 @@ export default function PostCallOutcomeModal() {
           </button>
         </div>
 
-        {isMobile ? outcomeSection : callInformationSection}
-        {isMobile ? callInformationSection : outcomeSection}
+        {isMobile ? (
+          <>
+            <div className="agent-mobile-outcome-sheet__form-block">{outcomeBody}</div>
+            <div className="agent-mobile-outcome-sheet__info-block">
+              <div className="agent-mobile-outcome-sheet__info-title">Call Information</div>
+              {callInformationBody}
+            </div>
+          </>
+        ) : (
+          <>
+            {callInformationSection}
+            {outcomeSection}
+          </>
+        )}
 
         {/* Footer */}
-        <div className={isMobile ? 'agent-mobile-outcome-sheet__footer' : undefined} style={{ padding: isMobile ? '14px 16px calc(14px + env(safe-area-inset-bottom))' : '16px 24px', borderTop: '1px solid #f1f5f9', display: 'flex', flexDirection: isMobile ? 'column-reverse' : 'row', justifyContent: 'flex-end', gap: 10 }}>
+        <div className={isMobile ? 'agent-mobile-outcome-sheet__footer' : undefined} style={{ padding: isMobile ? '14px 16px calc(14px + env(safe-area-inset-bottom))' : '16px 24px', borderTop: '1px solid #f1f5f9', display: 'flex', flexDirection: isMobile ? 'row' : 'row', justifyContent: 'flex-end', gap: 10 }}>
           <button
             onClick={handleRedial}
             className={isMobile ? 'agent-mobile-outcome-sheet__secondary' : undefined}
@@ -334,6 +363,7 @@ export default function PostCallOutcomeModal() {
               border: 'none', borderRadius: 8, cursor: 'pointer',
               display: 'inline-flex', alignItems: 'center', gap: 6,
               justifyContent: 'center',
+              width: isMobile ? 108 : 'auto',
             }}
           >
             <Phone size={14} /> Redial

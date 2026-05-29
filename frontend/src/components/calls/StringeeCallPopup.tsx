@@ -119,10 +119,144 @@ export default function StringeeCallPopup() {
 
   if (!state.visible) return null;
 
+  const hotlineOptions = state.hotlines.map((hotline) => ({ value: hotline, label: `+${hotline}` }));
+
+  if (isMobile) {
+    return (
+      <div
+        ref={popupRef}
+        className="agent-mobile-call-widget"
+        style={{
+          position: 'fixed',
+          left: 10,
+          right: 10,
+          bottom: 88,
+          zIndex: 1200,
+          overflow: 'hidden',
+        }}
+      >
+        <div className="agent-mobile-call-widget__topbar">
+          <div className="agent-mobile-call-widget__topbar-status">
+            <span className="agent-mobile-call-widget__status" style={{ width: 8, height: 8, borderRadius: '50%', background: dotColor }} />
+            <span>{getStatusLabel(state)}</span>
+          </div>
+          <button
+            onClick={() => stringeeService.dismiss()}
+            disabled={busy}
+            className="agent-mobile-call-widget__close"
+            style={{ opacity: busy ? 0.45 : 1 }}
+          >
+            <X size={14} />
+          </button>
+        </div>
+
+        <div className="agent-mobile-call-widget__panel">
+          <div className="agent-mobile-call-widget__hero">
+            <div className="agent-mobile-call-widget__eyebrow">{state.callStatus === 'in_call' ? 'In Call' : getStatusLabel(state)}</div>
+            <div className="agent-mobile-call-widget__lead">{state.activeLeadName || 'Lead'}</div>
+            <div className="agent-mobile-call-widget__phone">{state.activePhone || 'Loading number…'}</div>
+            <div className="agent-mobile-call-widget__timer">
+              {busy ? formatDuration(state.elapsedSeconds) : '00:00'}
+            </div>
+          </div>
+
+          <div className="agent-mobile-call-widget__field-group">
+            <div className="agent-mobile-call-widget__field-label">From Number</div>
+            {state.loadingHotlines ? (
+              <div className="agent-mobile-call-widget__selector agent-mobile-call-widget__selector--readonly">
+                Loading numbers…
+              </div>
+            ) : state.hotlines.length === 0 ? (
+              <div className="agent-mobile-call-widget__selector agent-mobile-call-widget__selector--readonly">
+                No numbers available
+              </div>
+            ) : busy ? (
+              <div className="agent-mobile-call-widget__selector agent-mobile-call-widget__selector--readonly">
+                {state.selectedHotline ? `+${state.selectedHotline}` : 'No number selected'}
+              </div>
+            ) : (
+              <Dropdown
+                value={state.selectedHotline || ''}
+                onChange={(value) => stringeeService.setSelectedHotline(value)}
+                options={hotlineOptions}
+                placeholder="Select a number"
+                height={40}
+              />
+            )}
+          </div>
+
+          {state.error && (
+            <div className="agent-mobile-call-widget__error">
+              <span>{state.error}</span>
+              <button
+                onClick={() => stringeeService.clearError()}
+                className="agent-mobile-call-widget__error-dismiss"
+              >
+                Dismiss
+              </button>
+            </div>
+          )}
+
+          <div className="agent-mobile-call-widget__actions">
+            {busy ? (
+              <>
+                <button
+                  onClick={() => stringeeService.toggleMute()}
+                  disabled={!state.canMute}
+                  title={state.muted ? 'Unmute' : 'Mute'}
+                  className="agent-mobile-call-widget__button agent-mobile-call-widget__button--muted"
+                  style={{ opacity: state.canMute ? 1 : 0.5 }}
+                >
+                  <MicOff size={15} />
+                </button>
+                <button
+                  onClick={() => void stringeeService.hangup()}
+                  title="Hang up"
+                  className="agent-mobile-call-widget__button agent-mobile-call-widget__button--danger"
+                >
+                  <PhoneOff size={16} />
+                </button>
+              </>
+            ) : (
+              <>
+                <button
+                  onClick={() => void stringeeService.placeCall()}
+                  disabled={!canDial}
+                  title="Call"
+                  className="agent-mobile-call-widget__button agent-mobile-call-widget__button--call"
+                  style={{ opacity: canDial ? 1 : 0.55 }}
+                >
+                  <Phone size={16} />
+                </button>
+                <button
+                  onClick={() => stringeeService.dismiss()}
+                  title="Cancel"
+                  className="agent-mobile-call-widget__button agent-mobile-call-widget__button--muted"
+                >
+                  <X size={15} />
+                </button>
+              </>
+            )}
+
+            {state.activeLeadId && (
+              <button
+                onClick={() => stringeeService.openOutcomeForActiveLead()}
+                title="Log call outcome"
+                className="agent-mobile-call-widget__log"
+              >
+                Log
+              </button>
+            )}
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div
       ref={popupRef}
-      className={isMobile ? 'agent-mobile-call-widget' : undefined}
+      className={undefined}
       style={{
         position: 'fixed',
         width: isMobile ? 'auto' : POPUP_WIDTH,

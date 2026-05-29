@@ -24,13 +24,13 @@ interface Lead {
   campaign?: { name: string };
 }
 
-const STATUS_OPTIONS: { value: string; label: string }[] = [
+const FOLLOW_UP_STATUS_OPTIONS: { value: string; label: string }[] = [
   { value: '', label: 'All followup statuses' },
   { value: 'uncontacted', label: 'Uncontacted' },
   { value: 'contacted', label: 'Contacted' },
   { value: 'lead', label: 'Interested' },
   { value: 'callback', label: 'Callback' },
-  { value: 'not_interested', label: 'Not interested' },
+  { value: 'not_interested', label: 'Not Interested' },
   { value: 'dnd', label: 'DND' },
   { value: 'invalid', label: 'Invalid' },
 ];
@@ -322,7 +322,7 @@ export default function AgentLeadsPage() {
                     value={draftStatus}
                     onChange={setDraftStatus}
                     placeholder="All followup statuses"
-                    options={STATUS_OPTIONS.map((option) => ({
+                    options={FOLLOW_UP_STATUS_OPTIONS.map((option) => ({
                       value: option.value,
                       label: option.label,
                       colour: option.value ? STATUS_COLORS[option.value]?.dot : undefined,
@@ -431,7 +431,7 @@ export default function AgentLeadsPage() {
               value={draftStatus}
               onChange={setDraftStatus}
               placeholder="All followup statuses"
-              options={STATUS_OPTIONS.map((o) => ({
+              options={FOLLOW_UP_STATUS_OPTIONS.map((o) => ({
                 value: o.value,
                 label: o.label,
                 colour: o.value ? STATUS_COLORS[o.value]?.dot : undefined,
