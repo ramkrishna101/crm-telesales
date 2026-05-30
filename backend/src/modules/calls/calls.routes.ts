@@ -120,12 +120,15 @@ router.get('/', async (req: Request, res: Response, next: NextFunction) => {
     const { role: callerRole, userId } = req.user!;
     const {
       page = '1', limit = '50', agentId, leadId, campaignId,
-      from, to, tag,
+      from, to, tag, callResult, search,
     } = req.query as Record<string, string>;
     const skip = (parseInt(page) - 1) * parseInt(limit);
 
     const dateFilter = from && to
-      ? { gte: new Date(from), lte: new Date(to) }
+      ? {
+          gte: new Date(`${from}T00:00:00+05:30`),
+          lte: new Date(`${to}T23:59:59.999+05:30`),
+        }
       : undefined;
 
     let where: Record<string, unknown> = {};
@@ -141,11 +144,15 @@ router.get('/', async (req: Request, res: Response, next: NextFunction) => {
 
     if (agentId && callerRole !== 'agent') where.agentId = agentId;
     if (leadId) where.leadId = leadId;
-    if (tag) where.dispositionTag = tag;
+    if (tag || callResult) where.dispositionTag = callResult || tag;
     if (dateFilter) where.calledAt = dateFilter;
     if (campaignId) {
       const existingLeadFilter = (where.lead as Record<string, unknown>) || {};
       where.lead = { ...existingLeadFilter, campaignId };
+    }
+    if (search) {
+      const existingLeadFilter = (where.lead as Record<string, unknown>) || {};
+      where.lead = { ...existingLeadFilter, phone: { contains: search.trim() } };
     }
 
     const [logs, total] = await Promise.all([
@@ -156,7 +163,17 @@ router.get('/', async (req: Request, res: Response, next: NextFunction) => {
         orderBy: { calledAt: 'desc' },
         include: {
           agent: { select: { id: true, name: true } },
-          lead: { select: { id: true, name: true, phone: true, campaignId: true, status: true, priority: true } },
+          lead: {
+            select: {
+              id: true,
+              name: true,
+              phone: true,
+              campaignId: true,
+              status: true,
+              priority: true,
+              campaign: { select: { id: true, name: true } },
+            },
+          },
         },
       }),
       prisma.callLog.count({ where }),
@@ -182,8 +199,10 @@ router.get('/', async (req: Request, res: Response, next: NextFunction) => {
 
 router.get('/summary', requireRole(...ADMIN_ROLES, 'supervisor'), async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const { from, to, agentId, campaignId } = req.query as Record<string, string>;
+    const { from, to, agentId, campaignId, tag, callResult, search } = req.query as Record<string, string>;
     const { role: callerRole, userId } = req.user!;
+    const dispositionFilter = callResult || tag;
+    const trimmedSearch = search?.trim();
 
     let dateFilter: Record<string, Date> | undefined;
     if (from && to) {
@@ -203,12 +222,14 @@ router.get('/summary', requireRole(...ADMIN_ROLES, 'supervisor'), async (req: Re
     const whereClause = {
       calledAt: dateFilter,
       ...(agentId ? { agentId } : {}),
+      ...(dispositionFilter ? { dispositionTag: dispositionFilter } : {}),
       ...(scopedAgentIds ? { agentId: { in: scopedAgentIds } } : {}),
-      ...(branchId || campaignId
+      ...(branchId || campaignId || trimmedSearch
         ? {
             lead: {
               ...(branchId ? { branchId } : {}),
               ...(campaignId ? { campaignId } : {}),
+              ...(trimmedSearch ? { phone: { contains: trimmedSearch } } : {}),
             },
           }
         : {}),
@@ -220,8 +241,14 @@ router.get('/summary', requireRole(...ADMIN_ROLES, 'supervisor'), async (req: Re
       : scopedAgentIds
         ? Prisma.sql`AND cl."agentId" IN (${Prisma.join(scopedAgentIds)})`
         : Prisma.empty;
+    const rawDispositionClause = dispositionFilter
+      ? Prisma.sql`AND cl."dispositionTag" = ${dispositionFilter}`
+      : Prisma.empty;
     const rawBranchClause = branchId ? Prisma.sql`AND l."branchId" = ${branchId}` : Prisma.empty;
     const rawCampaignClause = campaignId ? Prisma.sql`AND l."campaignId" = ${campaignId}` : Prisma.empty;
+    const rawPhoneClause = trimmedSearch
+      ? Prisma.sql`AND l."phone" LIKE ${`%${trimmedSearch}%`}`
+      : Prisma.empty;
 
     const [tagBreakdown, hourlyHeatmap, dailyTotals, agentLeaderboard] = await Promise.all([
       // Calls by disposition tag
@@ -240,8 +267,10 @@ router.get('/summary', requireRole(...ADMIN_ROLES, 'supervisor'), async (req: Re
         WHERE cl."calledAt" >= ${dateFilter.gte}
         ${rawDateUpperClause}
         ${rawAgentClause}
+        ${rawDispositionClause}
         ${rawBranchClause}
         ${rawCampaignClause}
+        ${rawPhoneClause}
         GROUP BY EXTRACT(HOUR FROM cl."calledAt" AT TIME ZONE 'UTC' AT TIME ZONE 'Asia/Kolkata')
         ORDER BY hour
       `,
@@ -255,8 +284,10 @@ router.get('/summary', requireRole(...ADMIN_ROLES, 'supervisor'), async (req: Re
          WHERE cl."calledAt" >= ${dateFilter.gte}
          ${rawDateUpperClause}
          ${rawAgentClause}
+         ${rawDispositionClause}
          ${rawBranchClause}
          ${rawCampaignClause}
+        ${rawPhoneClause}
          GROUP BY DATE(cl."calledAt" AT TIME ZONE 'UTC' AT TIME ZONE 'Asia/Kolkata') ORDER BY date
       `,
 
@@ -283,8 +314,10 @@ router.get('/summary', requireRole(...ADMIN_ROLES, 'supervisor'), async (req: Re
         WHERE cl."calledAt" >= ${dateFilter.gte}
         ${rawDateUpperClause}
         ${rawAgentClause}
+        ${rawDispositionClause}
         ${rawBranchClause}
         ${rawCampaignClause}
+        ${rawPhoneClause}
         GROUP BY u.id, u.name ORDER BY calls DESC LIMIT 20
       `,
     ]);

@@ -27,6 +27,7 @@ import TagsPage from '../pages/admin/TagsPage';
 import AnalyticsPage from '../pages/admin/AnalyticsPage';
 import BranchesPage from '../pages/admin/BranchesPage';
 import ConfigurationPage from '../pages/admin/ConfigurationPage';
+import AdminCallsPage from '../pages/admin/AdminCallsPage';
 
 // Supervisor
 import SupervisorDashboard from '../pages/supervisor/SupervisorDashboard';
@@ -68,6 +69,7 @@ export default function AppRouter() {
         <Route path="/admin/teams" element={<TeamsPage />} />
         <Route path="/admin/campaigns" element={<CampaignsPage />} />
         <Route path="/admin/leads" element={<LeadsPage />} />
+        <Route path="/admin/calls" element={<AdminCallsPage />} />
         <Route path="/admin/tags" element={<TagsPage />} />
         <Route path="/admin/analytics" element={<AnalyticsPage />} />
         {/* Fallback for unbuilt sub-pages */}
