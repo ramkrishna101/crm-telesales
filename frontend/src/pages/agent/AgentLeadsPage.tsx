@@ -7,7 +7,7 @@ import { useIsMobile } from '../../hooks/useIsMobile';
 import Dropdown from '../../components/ui/Dropdown';
 import { 
   Search, User, Phone, Calendar, MessageSquare, 
-  ExternalLink, ChevronLeft, ChevronRight, Mail, Hash, Clock, History, PhoneCall, SlidersHorizontal, Languages, FileText
+  ExternalLink, ChevronLeft, ChevronRight, Mail, Hash, Clock, History, PhoneCall, SlidersHorizontal, Languages, FileText, Copy, Check, X
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { stringeeService } from '../../services/stringee.service';
@@ -111,6 +111,23 @@ export default function AgentLeadsPage() {
   const updateDraftCampaign = (value: string, label?: string) => {
     setDraftCampaignId(value);
     setDraftCampaignLabel(value ? (label || draftCampaignLabel || campaignFilterLabel || 'Selected campaign') : '');
+  };
+
+  const copyPhone = async (leadId: string) => {
+    try {
+      const response = await leadsService.getPhone(leadId);
+      const phone = response.data?.data?.phone;
+      if (!phone) {
+        toast.error('Phone number unavailable');
+        return;
+      }
+
+      await navigator.clipboard.writeText(phone);
+      toast.success(`Copied: ${phone}`);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Clipboard not available';
+      toast.error(message);
+    }
   };
 
   const applyFilters = () => {
@@ -291,7 +308,27 @@ export default function AgentLeadsPage() {
                   <div className="agent-mobile-lead-head">
                     <div>
                       <div className="agent-mobile-lead-name">{selectedLead.name || 'Unknown'}</div>
-                      <div className="agent-mobile-lead-phone">{selectedLead.phone}</div>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                        <div className="agent-mobile-lead-phone">{selectedLead.phone}</div>
+                        <button
+                          type="button"
+                          onClick={() => void copyPhone(selectedLead.id)}
+                          aria-label="Copy phone number"
+                          title="Copy phone number"
+                          style={{
+                            border: 'none',
+                            background: 'transparent',
+                            color: '#94a3b8',
+                            display: 'inline-flex',
+                            alignItems: 'center',
+                            justifyContent: 'center',
+                            padding: 0,
+                            cursor: 'pointer',
+                          }}
+                        >
+                          <Copy size={14} />
+                        </button>
+                      </div>
                       {selectedLead.email && <div className="agent-mobile-muted">{selectedLead.email}</div>}
                     </div>
                     <div className="agent-mobile-chip-stack">
@@ -639,7 +676,27 @@ export default function AgentLeadsPage() {
                                 )}
                               </div>
                               <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: '0.75rem', color: 'var(--text-secondary)', marginTop: 2, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-                                <Phone size={11} style={{ flexShrink: 0 }} /> {lead.phone}
+                                <Phone size={11} style={{ flexShrink: 0 }} />
+                                <span>{lead.phone}</span>
+                                <button
+                                  type="button"
+                                  onClick={() => void copyPhone(lead.id)}
+                                  aria-label="Copy phone number"
+                                  title="Copy phone number"
+                                  style={{
+                                    border: 'none',
+                                    background: 'transparent',
+                                    color: '#94a3b8',
+                                    display: 'inline-flex',
+                                    alignItems: 'center',
+                                    justifyContent: 'center',
+                                    padding: 0,
+                                    cursor: 'pointer',
+                                    flexShrink: 0,
+                                  }}
+                                >
+                                  <Copy size={12} />
+                                </button>
                                 {lead.email && <span style={{ opacity: 0.4 }}>•</span>}
                                 {lead.email && <span style={{ overflow: 'hidden', textOverflow: 'ellipsis' }}>{lead.email}</span>}
                               </div>
@@ -800,6 +857,25 @@ function LeadDetailsModal({ leadId, onClose }: { leadId: string, onClose: () => 
   const qc = useQueryClient();
   const [newComment, setNewComment] = useState('');
   const [activeTab, setActiveTab] = useState<'history' | 'comments'>('comments');
+  const [statusDraft, setStatusDraft] = useState('');
+  const [callResultDraft, setCallResultDraft] = useState('');
+
+  const copyPhone = async (leadIdToCopy: string) => {
+    try {
+      const response = await leadsService.getPhone(leadIdToCopy);
+      const phone = response.data?.data?.phone;
+      if (!phone) {
+        toast.error('Phone number unavailable');
+        return;
+      }
+
+      await navigator.clipboard.writeText(phone);
+      toast.success(`Copied: ${phone}`);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Clipboard not available';
+      toast.error(message);
+    }
+  };
 
   const { data: leadData, isLoading: isLeadLoading } = useQuery({
     queryKey: ['lead-details', leadId],
@@ -809,6 +885,12 @@ function LeadDetailsModal({ leadId, onClose }: { leadId: string, onClose: () => 
   const { data: historyData, isLoading: isHistoryLoading } = useQuery({
     queryKey: ['lead-history', leadId],
     queryFn: () => callsService.list({ leadId }),
+  });
+
+  const { data: tagsData } = useQuery({
+    queryKey: ['disposition-tags'],
+    queryFn: () => tagsService.list(),
+    staleTime: 5 * 60 * 1000,
   });
 
   const addCommentMutation = useMutation({
@@ -821,9 +903,42 @@ function LeadDetailsModal({ leadId, onClose }: { leadId: string, onClose: () => 
     onError: () => toast.error('Failed to save comment')
   });
 
+  const updateStatusMutation = useMutation({
+    mutationFn: (status: string) => leadsService.updateStatus(leadId, status),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['lead-details', leadId] });
+      qc.invalidateQueries({ queryKey: ['agent-leads'] });
+      toast.success('Follow-up status updated');
+    },
+    onError: () => toast.error('Failed to update follow-up status'),
+  });
+
+  const updateCallResultMutation = useMutation({
+    mutationFn: (dispositionTag: string) => leadsService.updateCallResult(leadId, dispositionTag),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['lead-details', leadId] });
+      qc.invalidateQueries({ queryKey: ['lead-history', leadId] });
+      qc.invalidateQueries({ queryKey: ['agent-leads'] });
+      toast.success('Call result updated');
+    },
+    onError: (error: any) => toast.error(error?.response?.data?.error?.message || 'Failed to update call result'),
+  });
+
   const lead = leadData?.data?.data;
   const history = historyData?.data?.data?.logs || [];
   const comments = lead?.comments || [];
+  const dispositionTags: { name: string; color?: string | null }[] = tagsData?.data?.data || tagsData?.data || [];
+  const latestCallResult = history[0]?.dispositionTag || '';
+  const hasStatusChange = Boolean(statusDraft && statusDraft !== (lead?.status || ''));
+  const hasCallResultChange = Boolean(callResultDraft && callResultDraft !== latestCallResult);
+
+  useEffect(() => {
+    setStatusDraft(lead?.status || '');
+  }, [lead?.status]);
+
+  useEffect(() => {
+    setCallResultDraft(latestCallResult);
+  }, [latestCallResult]);
 
   const overlayStyle: React.CSSProperties = {
     position: 'fixed', inset: 0, background: 'rgba(15,23,42,0.55)',
@@ -919,9 +1034,130 @@ function LeadDetailsModal({ leadId, onClose }: { leadId: string, onClose: () => 
               </div>
             </div>
 
+            <div>
+              <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) max-content', columnGap: 28, rowGap: 6, width: '100%', alignItems: 'center' }}>
+                <div style={{
+                  fontSize: 10, color: '#94a3b8', textTransform: 'uppercase',
+                  fontWeight: 700, letterSpacing: '0.06em',
+                  display: 'flex', alignItems: 'center', gap: 6,
+                }}>
+                  <Phone size={13} /> Phone
+                </div>
+                <div style={{
+                  fontSize: 10, color: '#94a3b8', textTransform: 'uppercase',
+                  fontWeight: 700, letterSpacing: '0.06em', justifySelf: 'start',
+                }}>
+                  Follow-up Status
+                </div>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8, minWidth: 0 }}>
+                  <div style={{ fontWeight: 500, fontSize: 13, color: '#0f172a' }}>{lead.phone}</div>
+                  <button
+                    type="button"
+                    onClick={() => void copyPhone(lead.id)}
+                    aria-label="Copy phone number"
+                    title="Copy phone number"
+                    style={{ border: 'none', background: 'transparent', color: '#94a3b8', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', padding: 0, cursor: 'pointer' }}
+                  >
+                    <Copy size={14} />
+                  </button>
+                </div>
+                <div style={{ display: 'flex', alignItems: 'center', justifySelf: 'start', gap: 4 }}>
+                  <div style={{ width: 108, minWidth: 108 }}>
+                    <Dropdown
+                      value={statusDraft}
+                      onChange={setStatusDraft}
+                      options={FOLLOW_UP_STATUS_OPTIONS}
+                      placeholder="Status"
+                      height={30}
+                    />
+                  </div>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 4, width: 52, minWidth: 52 }}>
+                    <button
+                      type="button"
+                      aria-label="Save follow-up status"
+                      title="Save follow-up status"
+                      disabled={!hasStatusChange || updateStatusMutation.isPending}
+                      onClick={() => {
+                        if (hasStatusChange) updateStatusMutation.mutate(statusDraft);
+                      }}
+                      style={{ width: 24, height: 24, borderRadius: 6, border: 'none', background: '#dcfce7', color: '#15803d', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', cursor: hasStatusChange ? 'pointer' : 'default', opacity: hasStatusChange ? (updateStatusMutation.isPending ? 0.45 : 1) : 0, pointerEvents: hasStatusChange ? 'auto' : 'none' }}
+                    >
+                      <Check size={12} />
+                    </button>
+                    <button
+                      type="button"
+                      aria-label="Reset follow-up status"
+                      title="Reset follow-up status"
+                      disabled={!hasStatusChange}
+                      onClick={() => {
+                        if (hasStatusChange) setStatusDraft(lead.status || '');
+                      }}
+                      style={{ width: 24, height: 24, borderRadius: 6, border: 'none', background: '#f1f5f9', color: '#64748b', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', cursor: hasStatusChange ? 'pointer' : 'default', opacity: hasStatusChange ? 1 : 0, pointerEvents: hasStatusChange ? 'auto' : 'none' }}
+                    >
+                      <X size={12} />
+                    </button>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <div>
+              <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) max-content', columnGap: 28, rowGap: 6, width: '100%', alignItems: 'center' }}>
+                <div style={{
+                  fontSize: 10, color: '#94a3b8', textTransform: 'uppercase',
+                  fontWeight: 700, letterSpacing: '0.06em',
+                  display: 'flex', alignItems: 'center', gap: 6,
+                }}>
+                  <Mail size={13} /> Email
+                </div>
+                <div style={{
+                  fontSize: 10, color: '#94a3b8', textTransform: 'uppercase',
+                  fontWeight: 700, letterSpacing: '0.06em', justifySelf: 'start',
+                }}>
+                  Call Result
+                </div>
+                <div style={{ fontWeight: 500, fontSize: 13, color: '#0f172a', minWidth: 0 }}>{lead.email || 'Not provided'}</div>
+                <div style={{ display: 'flex', alignItems: 'center', justifySelf: 'start', gap: 4 }}>
+                  <div style={{ width: 108, minWidth: 108 }}>
+                    <Dropdown
+                      value={callResultDraft}
+                      onChange={setCallResultDraft}
+                      options={dispositionTags.map((tag) => ({ value: tag.name, label: tag.name, colour: tag.color || undefined }))}
+                      placeholder="Select call result"
+                      height={30}
+                    />
+                  </div>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 4, width: 52, minWidth: 52 }}>
+                    <button
+                      type="button"
+                      aria-label="Save call result"
+                      title="Save call result"
+                      disabled={!hasCallResultChange || updateCallResultMutation.isPending}
+                      onClick={() => {
+                        if (hasCallResultChange) updateCallResultMutation.mutate(callResultDraft);
+                      }}
+                      style={{ width: 24, height: 24, borderRadius: 6, border: 'none', background: '#dcfce7', color: '#15803d', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', cursor: hasCallResultChange ? 'pointer' : 'default', opacity: hasCallResultChange ? (updateCallResultMutation.isPending ? 0.45 : 1) : 0, pointerEvents: hasCallResultChange ? 'auto' : 'none' }}
+                    >
+                      <Check size={12} />
+                    </button>
+                    <button
+                      type="button"
+                      aria-label="Reset call result"
+                      title="Reset call result"
+                      disabled={!hasCallResultChange}
+                      onClick={() => {
+                        if (hasCallResultChange) setCallResultDraft(latestCallResult);
+                      }}
+                      style={{ width: 24, height: 24, borderRadius: 6, border: 'none', background: '#f1f5f9', color: '#64748b', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', cursor: hasCallResultChange ? 'pointer' : 'default', opacity: hasCallResultChange ? 1 : 0, pointerEvents: hasCallResultChange ? 'auto' : 'none' }}
+                    >
+                      <X size={12} />
+                    </button>
+                  </div>
+                </div>
+              </div>
+            </div>
+
             {[
-              { icon: <Phone size={13} />, label: 'Phone', value: lead.phone },
-              { icon: <Mail size={13} />, label: 'Email', value: lead.email || 'Not provided' },
               { icon: <Hash size={13} />, label: 'Campaign', value: lead.campaign?.name || 'N/A' },
               { icon: <Calendar size={13} />, label: 'Registered', value: new Date(lead.createdAt).toLocaleDateString() },
             ].map((item, i) => (

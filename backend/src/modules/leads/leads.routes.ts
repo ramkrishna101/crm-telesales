@@ -163,8 +163,8 @@ router.get('/', async (req: Request, res: Response, next: NextFunction) => {
         orderBy: [{ priority: 'desc' }, { createdAt: 'asc' }],
         select: {
           id: true,
-          // Mask phone for agents — show only last 4 digits
-          phone: callerRole !== 'agent',
+          // Always select the raw phone here; agent responses are masked below.
+          phone: true,
           email: true,
           name: true,
           status: true,
@@ -261,6 +261,45 @@ router.get('/:id/call-target', async (req: Request, res: Response, next: NextFun
       data: {
         id: lead.id,
         name: lead.name,
+        phone: lead.phone,
+      },
+    });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// ── GET /api/leads/:id/phone ─────────────────────────────────────────
+
+router.get('/:id/phone', async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const id = param(req, 'id');
+    const { role: callerRole, userId } = req.user!;
+
+    const lead = await prisma.lead.findFirst({
+      where: { id, deletedAt: null },
+      select: {
+        id: true,
+        phone: true,
+        assignedToId: true,
+        branchId: true,
+      },
+    });
+
+    if (!lead) throw new AppError(404, 'LEAD_NOT_FOUND', 'Lead not found');
+
+    if (callerRole === 'agent' && lead.assignedToId !== userId) {
+      throw new AppError(403, 'FORBIDDEN', 'This lead is not assigned to you');
+    }
+
+    if (callerRole !== 'super_admin') {
+      assertBranchAccess(req.user!, lead.branchId);
+    }
+
+    res.json({
+      success: true,
+      data: {
+        id: lead.id,
         phone: lead.phone,
       },
     });
@@ -436,6 +475,54 @@ router.put('/:id/status', async (req: Request, res: Response, next: NextFunction
     }
 
     const updated = await prisma.lead.update({ where: { id }, data: updates });
+    res.json({ success: true, data: updated });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// ── PUT /api/leads/:id/call-result ───────────────────────────────────
+// Update the latest call log disposition tag for a lead.
+
+router.put('/:id/call-result', async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const id = param(req, 'id');
+    const { dispositionTag } = z.object({
+      dispositionTag: z.string().min(1).max(50),
+    }).parse(req.body);
+
+    const lead = await prisma.lead.findFirst({ where: { id, deletedAt: null } });
+    if (!lead) throw new AppError(404, 'LEAD_NOT_FOUND', 'Lead not found');
+
+    if (req.user!.role === 'agent' && lead.assignedToId !== req.user!.userId) {
+      throw new AppError(403, 'FORBIDDEN', 'This lead is not assigned to you');
+    }
+
+    const tag = await prisma.dispositionTag.findUnique({ where: { name: dispositionTag } });
+    if (!tag) throw new AppError(400, 'INVALID_TAG', `Disposition tag "${dispositionTag}" does not exist`);
+
+    const latestCallLog = await prisma.callLog.findFirst({
+      where: { leadId: id },
+      orderBy: { calledAt: 'desc' },
+      select: { id: true },
+    });
+
+    const updated = latestCallLog
+      ? await prisma.callLog.update({
+        where: { id: latestCallLog.id },
+        data: { dispositionTag },
+        include: { agent: { select: { id: true, name: true } } },
+      })
+      : await prisma.callLog.create({
+        data: {
+          leadId: id,
+          agentId: req.user!.userId,
+          dispositionTag,
+          durationSeconds: 0,
+        },
+        include: { agent: { select: { id: true, name: true } } },
+      });
+
     res.json({ success: true, data: updated });
   } catch (err) {
     next(err);

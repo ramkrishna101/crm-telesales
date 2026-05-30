@@ -80,6 +80,7 @@ export const leadsService = {
   list: (params?: Record<string, string | number>) =>
     api.get('/leads', { params }),
   get: (id: string) => api.get(`/leads/${id}`),
+  getPhone: (id: string) => api.get(`/leads/${id}/phone`),
   getCallTarget: (id: string) => api.get(`/leads/${id}/call-target`),
   upload: (campaignId: string, file: File) => {
     const form = new FormData();
@@ -99,6 +100,8 @@ export const leadsService = {
     api.delete('/leads', { data: { leadIds } }),
   updateStatus: (id: string, status: string) =>
     api.put(`/leads/${id}/status`, { status }),
+  updateCallResult: (id: string, dispositionTag: string) =>
+    api.put(`/leads/${id}/call-result`, { dispositionTag }),
   addComment: (id: string, content: string) => api.post(`/leads/${id}/comments`, { content }),
 };
 
