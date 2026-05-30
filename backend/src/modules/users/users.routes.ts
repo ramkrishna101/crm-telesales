@@ -48,6 +48,95 @@ const updateUserSchema = z.object({
   path: ["teamId"],
 });
 
+async function getResolvedPortalAdminConfig(portalConfigId: string) {
+  const portal = await prisma.stringeePortalConfig.findUnique({
+    where: { id: portalConfigId },
+    select: {
+      id: true,
+      branchId: true,
+      portalName: true,
+      tenant: true,
+      apiSidEnc: true,
+      apiSecretEnc: true,
+      adminEmailEnc: true,
+      adminPasswordEnc: true,
+      createdAt: true,
+      updatedAt: true,
+    },
+  });
+
+  if (!portal) return null;
+
+  const portalSecrets = resolveStringeePortalSecrets(portal);
+  const resolvedPortal = {
+    portalConfigId: portal.id,
+    tenant: portal.tenant,
+    adminEmail: portalSecrets.adminEmail,
+    adminPassword: portalSecrets.adminPassword,
+  };
+
+  return hasStringeeXPortalAdminConfig(resolvedPortal) ? resolvedPortal : null;
+}
+
+async function releaseStaleStringeeAccountId(targetUserId: string, stringeeAccountId: string | null) {
+  if (!stringeeAccountId) return;
+
+  const conflictingUser = await prisma.user.findFirst({
+    where: {
+      stringeeAccountId,
+      deletedAt: null,
+      id: { not: targetUserId },
+    },
+    select: {
+      id: true,
+      name: true,
+      stringeeEmail: true,
+      stringeePortalConfigId: true,
+    },
+  });
+
+  if (!conflictingUser) return;
+
+  let replacementAccountId: string | null = null;
+  if (conflictingUser.stringeeEmail && conflictingUser.stringeePortalConfigId) {
+    try {
+      const portal = await getResolvedPortalAdminConfig(conflictingUser.stringeePortalConfigId);
+      if (portal) {
+        replacementAccountId = await resolveStringeeAccountIdByEmailForPortal(conflictingUser.stringeeEmail, portal);
+      }
+    } catch (err) {
+      console.warn('[stringeex] stale account reconciliation failed:', (err as Error).message);
+    }
+  }
+
+  if (replacementAccountId === stringeeAccountId) {
+    throw new AppError(
+      409,
+      'STRINGEE_ACCOUNT_ID_TAKEN',
+      `Stringee account is already linked to ${conflictingUser.name} — clear or resync them first`,
+    );
+  }
+
+  if (replacementAccountId) {
+    const replacementTaken = await prisma.user.findFirst({
+      where: {
+        stringeeAccountId: replacementAccountId,
+        deletedAt: null,
+        id: { not: conflictingUser.id },
+      },
+      select: { id: true },
+    });
+    if (replacementTaken) {
+      replacementAccountId = null;
+    }
+  }
+
+  await prisma.user.update({
+    where: { id: conflictingUser.id },
+    data: { stringeeAccountId: replacementAccountId },
+  });
+}
+
 // ── GET /api/users ────────────────────────────────────────────────────
 
 router.get('/', async (req: Request, res: Response, next: NextFunction) => {
@@ -147,37 +236,16 @@ router.post('/', requireRole(...ADMIN_ROLES), async (req: Request, res: Response
     let resolvedAccountId = body.stringeeAccountId?.trim() || null;
     if (!resolvedAccountId && body.stringeeEmail && stringeePortalConfigId) {
       try {
-        const portal = await prisma.stringeePortalConfig.findUnique({
-          where: { id: stringeePortalConfigId },
-          select: {
-            id: true,
-            branchId: true,
-            portalName: true,
-            tenant: true,
-            apiSidEnc: true,
-            apiSecretEnc: true,
-            adminEmailEnc: true,
-            adminPasswordEnc: true,
-            createdAt: true,
-            updatedAt: true,
-          },
-        });
-        if (portal) {
-          const portalSecrets = resolveStringeePortalSecrets(portal);
-          const resolvedPortal = {
-            portalConfigId: portal.id,
-            tenant: portal.tenant,
-            adminEmail: portalSecrets.adminEmail,
-            adminPassword: portalSecrets.adminPassword,
-          };
-          if (hasStringeeXPortalAdminConfig(resolvedPortal)) {
-            resolvedAccountId = await resolveStringeeAccountIdByEmailForPortal(body.stringeeEmail, resolvedPortal);
-          }
+        const resolvedPortal = await getResolvedPortalAdminConfig(stringeePortalConfigId);
+        if (resolvedPortal) {
+          resolvedAccountId = await resolveStringeeAccountIdByEmailForPortal(body.stringeeEmail, resolvedPortal);
         }
       } catch (err) {
         console.warn('[stringeex] auto-resolve on create failed:', (err as Error).message);
       }
     }
+
+    await releaseStaleStringeeAccountId('__new__', resolvedAccountId);
 
     const user = await prisma.user.create({
       data: {
@@ -251,6 +319,9 @@ router.put('/:id', requireRole(...ADMIN_ROLES), async (req: Request, res: Respon
     if (body.stringeePortalConfigId !== undefined) {
       updateData.stringeePortalConfigId = nextPortalConfigId;
     }
+    if (body.stringeeEmail !== undefined && !effectiveStringeeEmail && body.stringeeAccountId === undefined) {
+      updateData.stringeeAccountId = null;
+    }
     if (body.stringeeAccountId !== undefined) {
       const explicitId = body.stringeeAccountId?.trim() || null;
       const emailChanged =
@@ -259,32 +330,9 @@ router.put('/:id', requireRole(...ADMIN_ROLES), async (req: Request, res: Respon
         body.stringeeEmail;
       if (!explicitId && (emailChanged || portalChanged) && effectiveStringeeEmail && nextPortalConfigId) {
         try {
-          const portal = await prisma.stringeePortalConfig.findUnique({
-            where: { id: nextPortalConfigId },
-            select: {
-              id: true,
-              branchId: true,
-              portalName: true,
-              tenant: true,
-              apiSidEnc: true,
-              apiSecretEnc: true,
-              adminEmailEnc: true,
-              adminPasswordEnc: true,
-              createdAt: true,
-              updatedAt: true,
-            },
-          });
-          if (portal) {
-            const portalSecrets = resolveStringeePortalSecrets(portal);
-            const resolvedPortal = {
-              portalConfigId: portal.id,
-              tenant: portal.tenant,
-              adminEmail: portalSecrets.adminEmail,
-              adminPassword: portalSecrets.adminPassword,
-            };
-            if (hasStringeeXPortalAdminConfig(resolvedPortal)) {
-              updateData.stringeeAccountId = await resolveStringeeAccountIdByEmailForPortal(body.stringeeEmail as string, resolvedPortal);
-            }
+          const resolvedPortal = await getResolvedPortalAdminConfig(nextPortalConfigId);
+          if (resolvedPortal) {
+            updateData.stringeeAccountId = await resolveStringeeAccountIdByEmailForPortal(body.stringeeEmail as string, resolvedPortal);
           }
         } catch (err) {
           console.warn('[stringeex] auto-resolve on update failed:', (err as Error).message);
@@ -296,6 +344,7 @@ router.put('/:id', requireRole(...ADMIN_ROLES), async (req: Request, res: Respon
         updateData.stringeeAccountId = explicitId;
       }
     }
+    await releaseStaleStringeeAccountId(id, (updateData.stringeeAccountId as string | null | undefined) ?? null);
     if (body.role) updateData.role = body.role;
     if (body.teamId !== undefined) updateData.teamId = body.teamId;
     if (body.status) {
@@ -401,6 +450,8 @@ router.post('/:id/sync-stringee', requireRole(...ADMIN_ROLES), async (req: Reque
       );
     }
 
+    await releaseStaleStringeeAccountId(id, accountId);
+
     const user = await prisma.user.update({
       where: { id },
       data: { stringeeAccountId: accountId },
@@ -423,12 +474,20 @@ router.delete('/:id', requireRole(...ADMIN_ROLES), async (req: Request, res: Res
     if (!existing) throw new AppError(404, 'USER_NOT_FOUND', 'User not found');
     assertBranchAccess(req.user!, existing.branchId);
 
-    // Soft delete: mark deletedAt, mark inactive, and free up the unique email
-    // by suffixing it so a future user can re-use the same address.
+    // Soft delete: mark deletedAt, mark inactive, and release unique fields so
+    // replacement users can safely reuse the same login or Stringee identity.
     const tombstone = `${existing.email}__deleted_${Date.now()}`;
     await prisma.user.update({
       where: { id },
-      data: { deletedAt: new Date(), status: 'inactive', email: tombstone },
+      data: {
+        deletedAt: new Date(),
+        status: 'inactive',
+        email: tombstone,
+        stringeeEmail: null,
+        stringeeAccountId: null,
+        stringeePortalConfigId: null,
+        stringeePasswordEnc: null,
+      },
     });
     await revokeAllRefreshTokens(id);
     res.json({ success: true, data: { message: 'User deleted' } });
