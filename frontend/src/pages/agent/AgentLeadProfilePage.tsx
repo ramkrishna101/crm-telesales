@@ -18,7 +18,7 @@ const STATUS_COLORS: Record<string, { bg: string; fg: string; dot: string }> = {
 };
 
 const STATUS_LABELS: Record<string, string> = {
-  uncontacted: 'Uncontacted',
+  uncontacted: 'New Lead',
   contacted: 'Contacted',
   lead: 'Interested',
   callback: 'Callback',
@@ -30,7 +30,7 @@ const STATUS_LABELS: Record<string, string> = {
 type ActiveTab = 'comments' | 'history';
 
 const FOLLOWUP_STATUS_OPTIONS = [
-  { value: 'uncontacted', label: 'Uncontacted' },
+  { value: 'uncontacted', label: 'New Lead' },
   { value: 'contacted', label: 'Contacted' },
   { value: 'lead', label: 'Interested' },
   { value: 'callback', label: 'Callback' },
@@ -38,6 +38,10 @@ const FOLLOWUP_STATUS_OPTIONS = [
   { value: 'dnd', label: 'DND' },
   { value: 'invalid', label: 'Invalid' },
 ] as const;
+
+function isFreshLead(lead?: { status?: string | null; lastCalledAt?: string | Date | null }, latestCallResult?: string | null) {
+  return (lead?.status || 'uncontacted') === 'uncontacted' && !lead?.lastCalledAt && !latestCallResult;
+}
 
 export default function AgentLeadProfilePage() {
   const navigate = useNavigate();
@@ -119,6 +123,7 @@ export default function AgentLeadProfilePage() {
   const comments = lead?.comments || [];
   const dispositionTags: { name: string; color?: string | null }[] = tagsData?.data?.data || tagsData?.data || [];
   const latestCallResult = history[0]?.dispositionTag || '';
+  const showNewLeadState = isFreshLead(lead, latestCallResult);
   const hasStatusChange = Boolean(statusDraft && statusDraft !== (lead?.status || ''));
   const hasCallResultChange = Boolean(callResultDraft && callResultDraft !== latestCallResult);
 
@@ -135,7 +140,9 @@ export default function AgentLeadProfilePage() {
     return STATUS_COLORS[statusKey] || STATUS_COLORS.uncontacted;
   }, [lead?.status]);
 
-  const statusLabel = STATUS_LABELS[lead?.status || 'uncontacted'] || (lead?.status || 'uncontacted').replace('_', ' ');
+  const statusLabel = showNewLeadState
+    ? 'New Lead'
+    : (STATUS_LABELS[lead?.status || 'uncontacted'] || (lead?.status || 'uncontacted').replace('_', ' '));
 
   return (
     <AppLayout>
@@ -258,7 +265,7 @@ export default function AgentLeadProfilePage() {
                             value={callResultDraft}
                             onChange={setCallResultDraft}
                             options={dispositionTags.map((tag) => ({ value: tag.name, label: tag.name, colour: tag.color || undefined }))}
-                            placeholder="Select call result"
+                            placeholder={showNewLeadState ? 'New Lead' : 'Select call result'}
                             height={30}
                           />
                         </div>

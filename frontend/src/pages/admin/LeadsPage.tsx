@@ -1,18 +1,61 @@
-import { useState, useRef, useSyncExternalStore } from 'react';
+import { useEffect, useState, useRef, useSyncExternalStore } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { leadsService, usersService, campaignsService, tagsService } from '../../services/crm.service';
 import AppLayout from '../../components/layout/AppLayout';
 import ConfirmDialog from '../../components/ui/ConfirmDialog';
+import DateRangeFilter, { computeRange, type DateRangePreset, type DateRangeValue } from '../../components/ui/DateRangeFilter';
 import Dropdown from '../../components/ui/Dropdown';
 import toast from 'react-hot-toast';
 import * as XLSX from 'xlsx';
-import { Upload, Search, RefreshCw, ChevronLeft, ChevronRight, Download, FileSpreadsheet, CheckCircle2, X, UserCheck, PhoneCall, Trash2 } from 'lucide-react';
+import { Upload, Search, RefreshCw, ChevronLeft, ChevronRight, Download, FileSpreadsheet, CheckCircle2, X, UserCheck, PhoneCall, Trash2, SlidersHorizontal } from 'lucide-react';
 import { stringeeService } from '../../services/stringee.service';
+
+type OptionalColumnKey = 'followupStatus' | 'priority' | 'assignedTo' | 'lastCallResult' | 'language' | 'createdTime' | 'lastCalled';
+
+const OPTIONAL_COLUMNS: { key: OptionalColumnKey; label: string }[] = [
+  { key: 'followupStatus', label: 'Followup Status' },
+  { key: 'priority', label: 'Priority' },
+  { key: 'assignedTo', label: 'Assigned To' },
+  { key: 'lastCallResult', label: 'Last Call Result' },
+  { key: 'language', label: 'Language' },
+  { key: 'createdTime', label: 'Created Time' },
+  { key: 'lastCalled', label: 'Last Called' },
+];
+
+const DEFAULT_VISIBLE_COLUMNS: Record<OptionalColumnKey, boolean> = {
+  followupStatus: true,
+  priority: true,
+  assignedTo: true,
+  lastCallResult: true,
+  language: true,
+  createdTime: true,
+  lastCalled: true,
+};
+
+const LEADS_VISIBLE_COLUMNS_STORAGE_KEY = 'admin-leads-visible-columns';
+
+const DATE_RANGE_PRESETS: DateRangePreset[] = ['today', 'yesterday', 'last_7_days', 'this_month'];
+
+function getDateRangeValue(from: string, to: string): DateRangeValue {
+  if (!from && !to) return { preset: 'all_time', from: '', to: '' };
+
+  const normalizedFrom = from || to;
+  const normalizedTo = to || from;
+
+  for (const preset of DATE_RANGE_PRESETS) {
+    const range = computeRange(preset);
+    if (range.from === normalizedFrom && range.to === normalizedTo) {
+      return { preset, from: normalizedFrom, to: normalizedTo };
+    }
+  }
+
+  return { preset: 'custom', from: normalizedFrom, to: normalizedTo };
+}
 
 // ── Export Leads to Excel ─────────────────────────────────────────────
 
 async function exportLeads(
-  filters: { campaignId?: string; status?: string; assignedToId?: string },
+  filters: { campaignId?: string; status?: string; assignedToId?: string; callResult?: string; language?: string; from?: string; to?: string },
   campaigns: { id: string; name: string }[],
   agents: { id: string; name: string }[],
 ) {
@@ -84,7 +127,7 @@ interface Lead {
   id: string; name: string | null; phone?: string; email: string | null;
   status: string; priority: string; isDnd: boolean;
   assignedToId: string | null; assignedTo?: { id: string; name: string } | null;
-  campaignId: string; lastCallResult?: string | null; lastCalledAt: string | null; createdAt: string;
+  campaignId: string; lastCallResult?: string | null; lastCallLanguage?: string | null; lastCalledAt: string | null; createdAt: string;
 }
 
 // ── Upload Panel ──────────────────────────────────────────────────────
@@ -296,28 +339,96 @@ function UploadPanel({ campaigns, onDone, onClose }: {
 
 export default function LeadsPage() {
   const qc = useQueryClient();
+  const commonLanguages = ['Hindi', 'Kannada', 'Telugu', 'Tamil', 'English', 'Malayalam', 'Marathi', 'Bengali'];
+  const columnMenuRef = useRef<HTMLDivElement>(null);
   const [campaignFilter, setCampaignFilter] = useState('');
   const [statusFilter, setStatusFilter] = useState('');
   const [agentFilter, setAgentFilter] = useState('');
   // Draft + applied state for call result / lead status (Apply/Reset pattern)
   const [draftCallResult, setDraftCallResult] = useState('');
   const [draftFollowUp, setDraftFollowUp] = useState('');
+  const [draftLanguage, setDraftLanguage] = useState('');
+  const [draftCreatedFrom, setDraftCreatedFrom] = useState('');
+  const [draftCreatedTo, setDraftCreatedTo] = useState('');
   const [callResultFilter, setCallResultFilter] = useState('');
+  const [languageFilter, setLanguageFilter] = useState('');
+  const [createdFromFilter, setCreatedFromFilter] = useState('');
+  const [createdToFilter, setCreatedToFilter] = useState('');
   const [search, setSearch] = useState('');
   const [page, setPage] = useState(1);
   const [showUpload, setShowUpload] = useState(false);
+  const [isColumnMenuOpen, setIsColumnMenuOpen] = useState(false);
+  const [visibleColumns, setVisibleColumns] = useState<Record<OptionalColumnKey, boolean>>(() => {
+    if (typeof window === 'undefined') return DEFAULT_VISIBLE_COLUMNS;
+
+    try {
+      const rawValue = window.localStorage.getItem(LEADS_VISIBLE_COLUMNS_STORAGE_KEY);
+      if (!rawValue) return DEFAULT_VISIBLE_COLUMNS;
+      const parsedValue = JSON.parse(rawValue) as Partial<Record<OptionalColumnKey, boolean>>;
+      return { ...DEFAULT_VISIBLE_COLUMNS, ...parsedValue };
+    } catch {
+      return DEFAULT_VISIBLE_COLUMNS;
+    }
+  });
+  const [draftVisibleColumns, setDraftVisibleColumns] = useState<Record<OptionalColumnKey, boolean>>(visibleColumns);
   const [selected, setSelected] = useState<string[]>([]);
   const [confirmDelete, setConfirmDelete] = useState<string[] | null>(null);
   const LIMIT = 50;
 
-  const hasUnapplied = draftCallResult !== callResultFilter || draftFollowUp !== statusFilter;
-  const hasActiveFilters = !!(callResultFilter || statusFilter || draftCallResult || draftFollowUp);
+  useEffect(() => {
+    if (!isColumnMenuOpen) return;
 
-  const applyFilters = () => { setCallResultFilter(draftCallResult); setStatusFilter(draftFollowUp); setPage(1); };
-  const resetFilters = () => { setDraftCallResult(''); setDraftFollowUp(''); setCallResultFilter(''); setStatusFilter(''); setPage(1); };
+    const handlePointerDown = (event: MouseEvent) => {
+      if (!columnMenuRef.current?.contains(event.target as Node)) {
+        setIsColumnMenuOpen(false);
+      }
+    };
+
+    document.addEventListener('mousedown', handlePointerDown);
+    return () => document.removeEventListener('mousedown', handlePointerDown);
+  }, [isColumnMenuOpen]);
+
+  useEffect(() => {
+    if (!isColumnMenuOpen) return;
+    setDraftVisibleColumns(visibleColumns);
+  }, [isColumnMenuOpen, visibleColumns]);
+
+  const hasUnapplied =
+    draftCallResult !== callResultFilter ||
+    draftFollowUp !== statusFilter ||
+    draftLanguage !== languageFilter ||
+    draftCreatedFrom !== createdFromFilter ||
+    draftCreatedTo !== createdToFilter;
+  const hasActiveFilters = !!(
+    callResultFilter || statusFilter || draftCallResult || draftFollowUp || languageFilter || draftLanguage ||
+    createdFromFilter || createdToFilter || draftCreatedFrom || draftCreatedTo
+  );
+  const draftCreatedRange = getDateRangeValue(draftCreatedFrom, draftCreatedTo);
+
+  const applyFilters = () => {
+    setCallResultFilter(draftCallResult);
+    setStatusFilter(draftFollowUp);
+    setLanguageFilter(draftLanguage);
+    setCreatedFromFilter(draftCreatedFrom);
+    setCreatedToFilter(draftCreatedTo);
+    setPage(1);
+  };
+  const resetFilters = () => {
+    setDraftCallResult('');
+    setDraftFollowUp('');
+    setDraftLanguage('');
+    setDraftCreatedFrom('');
+    setDraftCreatedTo('');
+    setCallResultFilter('');
+    setStatusFilter('');
+    setLanguageFilter('');
+    setCreatedFromFilter('');
+    setCreatedToFilter('');
+    setPage(1);
+  };
 
   const { data: leadsData, isLoading } = useQuery({
-    queryKey: ['leads', page, campaignFilter, statusFilter, agentFilter, callResultFilter],
+    queryKey: ['leads', page, campaignFilter, statusFilter, agentFilter, callResultFilter, languageFilter, createdFromFilter, createdToFilter],
     queryFn: () => leadsService.list({ 
       page, 
       limit: LIMIT, 
@@ -325,6 +436,9 @@ export default function LeadsPage() {
       ...(statusFilter ? { status: statusFilter } : {}),
       ...(agentFilter ? { assignedToId: agentFilter } : {}),
       ...(callResultFilter ? { callResult: callResultFilter } : {}),
+      ...(languageFilter ? { language: languageFilter } : {}),
+      ...(createdFromFilter ? { from: createdFromFilter } : {}),
+      ...(createdToFilter ? { to: createdToFilter } : {}),
     }),
   });
 
@@ -378,6 +492,13 @@ export default function LeadsPage() {
   });
 
   const leads: Lead[] = leadsData?.data?.data?.leads || [];
+  const languageOptions = Array.from(
+    new Map(
+      [...commonLanguages, ...leads.map((lead) => lead.lastCallLanguage || ''), languageFilter, draftLanguage]
+        .filter((value): value is string => Boolean(value && value.trim()))
+        .map((value) => [value.toLowerCase(), value]),
+    ).values(),
+  ).sort((left, right) => left.localeCompare(right));
   const total: number = leadsData?.data?.data?.total || 0;
   const campaigns = campaignsData?.data?.data?.campaigns || [];
   const agents = agentsData?.data?.data?.users || [];
@@ -388,8 +509,20 @@ export default function LeadsPage() {
     uncontacted: '#6f63ff', contacted: '#3b82f6', lead: '#1f9d55',
     not_interested: '#dc2626', dnd: '#c2410c', invalid: '#64748b', callback: '#c67a0a',
   };
+  const callResultTone: Record<string, { background: string; color: string }> = {
+    'new lead': { background: '#ede9fe', color: '#6f63ff' },
+    interested: { background: '#dcfce7', color: '#15803d' },
+    contacted: { background: '#dbeafe', color: '#2563eb' },
+    callback: { background: '#fef3c7', color: '#b45309' },
+    'not interested': { background: '#fee2e2', color: '#dc2626' },
+    dnd: { background: '#ffedd5', color: '#c2410c' },
+    'invalid number': { background: '#e2e8f0', color: '#64748b' },
+    invalid: { background: '#e2e8f0', color: '#64748b' },
+    rnr: { background: '#e0e7ff', color: '#4338ca' },
+    busy: { background: '#fce7f3', color: '#be185d' },
+  };
   const statusLabel: Record<string, string> = {
-    uncontacted: 'Uncontacted',
+    uncontacted: 'New Lead',
     contacted: 'Contacted',
     lead: 'Interested',
     callback: 'Callback',
@@ -404,6 +537,33 @@ export default function LeadsPage() {
 
   const toggleSelect = (id: string) =>
     setSelected((s) => s.includes(id) ? s.filter((x) => x !== id) : [...s, id]);
+  const toggleDraftColumn = (key: OptionalColumnKey) =>
+    setDraftVisibleColumns((current) => ({ ...current, [key]: !current[key] }));
+  const selectAllColumns = () => setDraftVisibleColumns(DEFAULT_VISIBLE_COLUMNS);
+  const hasPendingColumnChanges = OPTIONAL_COLUMNS.some((column) => draftVisibleColumns[column.key] !== visibleColumns[column.key]);
+  const cancelColumnChanges = () => {
+    setDraftVisibleColumns(visibleColumns);
+    setIsColumnMenuOpen(false);
+  };
+  const applyColumnChanges = () => {
+    setVisibleColumns(draftVisibleColumns);
+    if (typeof window !== 'undefined') {
+      window.localStorage.setItem(LEADS_VISIBLE_COLUMNS_STORAGE_KEY, JSON.stringify(draftVisibleColumns));
+    }
+    setIsColumnMenuOpen(false);
+  };
+
+  const isFreshLead = (lead: Lead) => lead.status === 'uncontacted' && !lead.lastCalledAt && !lead.lastCallResult;
+  const getStatusDisplayLabel = (lead: Lead) => isFreshLead(lead) ? 'New Lead' : (statusLabel[lead.status] || lead.status.replace('_', ' '));
+  const getCallResultDisplayLabel = (lead: Lead) => lead.lastCallResult || (isFreshLead(lead) ? 'New Lead' : '');
+  const getCallResultTone = (result: string) => {
+    const tagColor = dispositionTags.find((tag) => tag.name.toLowerCase() === result.toLowerCase())?.color;
+    if (tagColor) {
+      return { background: `${tagColor}1a`, color: tagColor };
+    }
+
+    return callResultTone[result.toLowerCase()] || { background: '#eef2ff', color: '#4338ca' };
+  };
 
   const handleCall = async (lead: Lead) => {
     try {
@@ -452,6 +612,9 @@ export default function LeadsPage() {
                   ...(statusFilter ? { status: statusFilter } : {}),
                   ...(agentFilter ? { assignedToId: agentFilter } : {}),
                   ...(callResultFilter ? { callResult: callResultFilter } : {}),
+                  ...(languageFilter ? { language: languageFilter } : {}),
+                  ...(createdFromFilter ? { from: createdFromFilter } : {}),
+                  ...(createdToFilter ? { to: createdToFilter } : {}),
                 },
                 campaigns as { id: string; name: string }[],
                 agents as { id: string; name: string }[],
@@ -493,58 +656,93 @@ export default function LeadsPage() {
                 {assignCampaignMutation.isPending && <RefreshCw size={13} className="spin" style={{ color: 'var(--accent)' }} />}
               </div>
             )}
-        <div className="filter-bar">
-          <div className="search-box">
-            <Search size={15} className="search-icon" />
-            <input className="search-input" placeholder="Search by name…" value={search} onChange={(e) => setSearch(e.target.value)} />
+        <div className="filter-bar" style={{ alignItems: 'flex-end' }}>
+          <div className="form-group" style={{ minWidth: 220, flex: '1 1 220px' }}>
+            <label className="form-label">Search</label>
+            <div className="search-box" style={{ maxWidth: '100%' }}>
+              <Search size={15} className="search-icon" />
+              <input className="search-input" placeholder="Search by name…" value={search} onChange={(e) => setSearch(e.target.value)} />
+            </div>
           </div>
-          <div style={{ width: 180 }}>
+          <div className="form-group" style={{ width: 180 }}>
+            <label className="form-label">Campaign</label>
             <Dropdown
               value={campaignFilter}
               onChange={(value) => { setCampaignFilter(value); setPage(1); }}
-              placeholder="All Campaigns"
+              placeholder="All"
               options={[
-                { value: '', label: 'All Campaigns' },
+                { value: '', label: 'All' },
                 ...(campaigns as Record<string, string>[]).map((c) => ({ value: c.id, label: c.name })),
               ]}
             />
           </div>
-          <div style={{ width: 180 }}>
+          <div className="form-group" style={{ width: 180 }}>
+            <label className="form-label">Agent</label>
             <Dropdown
               value={agentFilter}
               onChange={(value) => { setAgentFilter(value); setPage(1); }}
-              placeholder="All Agents"
+              placeholder="All"
               options={[
-                { value: '', label: 'All Agents' },
+                { value: '', label: 'All' },
                 { value: 'null', label: 'Unassigned' },
                 ...(agents as Record<string, string>[]).map((a) => ({ value: a.id, label: a.name })),
               ]}
             />
           </div>
-          <Dropdown
-            value={draftFollowUp}
-            onChange={setDraftFollowUp}
-            placeholder="All followup statuses"
-            options={[
-              { value: '', label: 'All followup statuses' },
-              { value: 'uncontacted',    label: 'Uncontacted',    colour: '#6f63ff' },
-              { value: 'contacted',      label: 'Contacted',      colour: '#3b82f6' },
-              { value: 'lead',           label: 'Interested',     colour: '#1f9d55' },
-              { value: 'callback',       label: 'Callback',       colour: '#c67a0a' },
-              { value: 'not_interested', label: 'Not Interested', colour: '#dc2626' },
-              { value: 'dnd',            label: 'DND',            colour: '#c2410c' },
-              { value: 'invalid',        label: 'Invalid',        colour: '#64748b' },
-            ]}
-          />
-          <Dropdown
-            value={draftCallResult}
-            onChange={setDraftCallResult}
-            placeholder="All call results"
-            options={[
-              { value: '', label: 'All call results' },
-              ...dispositionTags.map((t) => ({ value: t.name, label: t.name, colour: t.color || undefined })),
-            ]}
-          />
+          <div className="form-group" style={{ width: 180 }}>
+            <label className="form-label">Followup Status</label>
+            <Dropdown
+              value={draftFollowUp}
+              onChange={setDraftFollowUp}
+              placeholder="All"
+              options={[
+                { value: '', label: 'All' },
+                { value: 'uncontacted',    label: 'New Lead',       colour: '#6f63ff' },
+                { value: 'contacted',      label: 'Contacted',      colour: '#3b82f6' },
+                { value: 'lead',           label: 'Interested',     colour: '#1f9d55' },
+                { value: 'callback',       label: 'Callback',       colour: '#c67a0a' },
+                { value: 'not_interested', label: 'Not Interested', colour: '#dc2626' },
+                { value: 'dnd',            label: 'DND',            colour: '#c2410c' },
+                { value: 'invalid',        label: 'Invalid',        colour: '#64748b' },
+              ]}
+            />
+          </div>
+          <div className="form-group" style={{ width: 180 }}>
+            <label className="form-label">Call Result</label>
+            <Dropdown
+              value={draftCallResult}
+              onChange={setDraftCallResult}
+              placeholder="All"
+              options={[
+                { value: '', label: 'All' },
+                ...dispositionTags.map((t) => ({ value: t.name, label: t.name, colour: t.color || undefined })),
+              ]}
+            />
+          </div>
+          <div className="form-group" style={{ width: 160 }}>
+            <label className="form-label">Language</label>
+            <Dropdown
+              value={draftLanguage}
+              onChange={setDraftLanguage}
+              placeholder="All"
+              options={[
+                { value: '', label: 'All' },
+                ...languageOptions.map((language) => ({ value: language, label: language })),
+              ]}
+            />
+          </div>
+          <div className="form-group" style={{ minWidth: 180 }}>
+            <label className="form-label">Created</label>
+            <DateRangeFilter
+              value={draftCreatedRange}
+              onChange={(next) => {
+                setDraftCreatedFrom(next.from);
+                setDraftCreatedTo(next.to);
+              }}
+              includeAllTime
+              allTimeLabel="All Data"
+            />
+          </div>
           <div style={{ display: 'flex', gap: 6 }}>
             <button
               type="button"
@@ -566,12 +764,98 @@ export default function LeadsPage() {
           <div className="table-header">
             <div style={{ width: 28 }}><input type="checkbox" onChange={(e) => setSelected(e.target.checked ? leads.map(l => l.id) : [])} /></div>
             <div className="table-col" style={{ flex: 2 }}>Contact</div>
-            <div className="table-col">Followup Status</div>
-            <div className="table-col">Priority</div>
-            <div className="table-col">Assigned To</div>
-            <div className="table-col">Last Call Result</div>
-            <div className="table-col">Last Called</div>
-            <div className="table-col">Actions</div>
+            {visibleColumns.followupStatus && <div className="table-col">Followup Status</div>}
+            {visibleColumns.priority && <div className="table-col">Priority</div>}
+            {visibleColumns.assignedTo && <div className="table-col">Assigned To</div>}
+            {visibleColumns.lastCallResult && <div className="table-col">Last Call Result</div>}
+            {visibleColumns.language && <div className="table-col">Language</div>}
+            {visibleColumns.createdTime && <div className="table-col">Created Time</div>}
+            {visibleColumns.lastCalled && <div className="table-col">Last Called</div>}
+            <div className="table-col" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
+              <span>Actions</span>
+              <div ref={columnMenuRef} style={{ position: 'relative' }}>
+                <button
+                  type="button"
+                  className="btn btn-secondary"
+                  onClick={() => setIsColumnMenuOpen((open) => !open)}
+                  title="Manage columns"
+                  aria-label="Manage columns"
+                  style={{ height: 30, width: 30, minWidth: 30, padding: 0, display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}
+                >
+                  <SlidersHorizontal size={14} />
+                </button>
+                {isColumnMenuOpen && (
+                  <div
+                    style={{
+                      position: 'absolute',
+                      top: 'calc(100% + 8px)',
+                      right: 0,
+                      width: 220,
+                      background: 'var(--bg-surface)',
+                      border: '1px solid var(--border)',
+                      borderRadius: 12,
+                      boxShadow: '0 18px 48px rgba(15, 23, 42, 0.16)',
+                      padding: 10,
+                      zIndex: 30,
+                    }}
+                  >
+                    <div style={{ fontSize: '0.74rem', fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.06em', padding: '4px 6px 8px' }}>
+                      Visible Columns
+                    </div>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '0 6px 8px' }}>
+                      <button
+                        type="button"
+                        onClick={selectAllColumns}
+                        style={{ border: 'none', background: 'transparent', padding: 0, fontSize: '0.8rem', fontWeight: 600, color: '#4f46e5', cursor: 'pointer' }}
+                      >
+                        Select All
+                      </button>
+                    </div>
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+                      {OPTIONAL_COLUMNS.map((column) => (
+                        <label
+                          key={column.key}
+                          style={{
+                            display: 'flex',
+                            alignItems: 'center',
+                            gap: 10,
+                            padding: '8px 10px',
+                            borderRadius: 8,
+                            cursor: 'pointer',
+                            color: 'var(--text-primary)',
+                            fontSize: '0.85rem',
+                          }}
+                        >
+                          <input
+                            type="checkbox"
+                            checked={draftVisibleColumns[column.key]}
+                            onChange={() => toggleDraftColumn(column.key)}
+                          />
+                          <span>{column.label}</span>
+                        </label>
+                      ))}
+                    </div>
+                    <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, paddingTop: 8 }}>
+                      <button
+                        type="button"
+                        onClick={cancelColumnChanges}
+                        style={{ height: 30, padding: '0 10px', fontSize: '0.78rem', fontWeight: 600, borderRadius: 8, border: '1px solid #cbd5e1', cursor: 'pointer', background: 'var(--bg-surface)', color: '#475569' }}
+                      >
+                        Cancel
+                      </button>
+                      <button
+                        type="button"
+                        onClick={applyColumnChanges}
+                        disabled={!hasPendingColumnChanges}
+                        style={{ height: 30, padding: '0 10px', fontSize: '0.78rem', fontWeight: 600, borderRadius: 8, border: 'none', cursor: hasPendingColumnChanges ? 'pointer' : 'not-allowed', background: hasPendingColumnChanges ? '#4f46e5' : '#cbd5e1', color: '#fff' }}
+                      >
+                        Apply
+                      </button>
+                    </div>
+                  </div>
+                )}
+              </div>
+            </div>
           </div>
           {isLoading && <div className="empty-state"><RefreshCw className="spin" size={20} /><p>Loading…</p></div>}
           {leads
@@ -585,40 +869,62 @@ export default function LeadsPage() {
                   {l.isDnd && <span style={{ color: '#ef4444', marginRight: 4 }}>⛔ DND</span>}
                   {l.email || ''}
                 </div>
+                <div style={{ fontSize: '0.74rem', color: 'var(--text-muted)', marginTop: 2 }}>
+                  Created: {new Date(l.createdAt).toLocaleString()}
+                </div>
               </div>
-              <div className="table-cell">
-                <span className="badge" style={{ background: (statusColour[l.status] || '#6366f1') + '1a', color: statusColour[l.status] || '#6366f1' }}>
-                  {statusLabel[l.status] || l.status.replace('_', ' ')}
-                </span>
-              </div>
-              <div className="table-cell">
-                <span className="badge" style={priorityTone[l.priority] || priorityTone.normal}>
-                  {l.priority}
-                </span>
-              </div>
-              <div className="table-cell" style={{ color: 'var(--text-secondary)' }}>
-                {l.assignedTo?.name || <span style={{ color: 'var(--text-muted)' }}>Unassigned</span>}
-              </div>
-              <div className="table-cell">
-                {l.lastCallResult ? (
-                  <span
-                    className="badge"
-                    style={{
-                      background: '#eef2ff',
-                      color: '#4338ca',
-                      whiteSpace: 'nowrap',
-                      textTransform: 'capitalize',
-                    }}
-                  >
-                    {l.lastCallResult}
+              {visibleColumns.followupStatus && (
+                <div className="table-cell">
+                  <span className="badge" style={{ background: (statusColour[l.status] || '#6366f1') + '1a', color: statusColour[l.status] || '#6366f1' }}>
+                    {getStatusDisplayLabel(l)}
                   </span>
-                ) : (
-                  <span style={{ color: 'var(--text-muted)', fontSize: '0.78rem' }}>—</span>
-                )}
-              </div>
-              <div className="table-cell" style={{ color: 'var(--text-muted)', fontSize: '0.78rem' }}>
-                {l.lastCalledAt ? new Date(l.lastCalledAt).toLocaleString() : '—'}
-              </div>
+                </div>
+              )}
+              {visibleColumns.priority && (
+                <div className="table-cell">
+                  <span className="badge" style={priorityTone[l.priority] || priorityTone.normal}>
+                    {l.priority}
+                  </span>
+                </div>
+              )}
+              {visibleColumns.assignedTo && (
+                <div className="table-cell" style={{ color: 'var(--text-secondary)' }}>
+                  {l.assignedTo?.name || <span style={{ color: 'var(--text-muted)' }}>Unassigned</span>}
+                </div>
+              )}
+              {visibleColumns.lastCallResult && (
+                <div className="table-cell">
+                  {getCallResultDisplayLabel(l) ? (
+                    <span
+                      className="badge"
+                      style={{
+                        ...getCallResultTone(getCallResultDisplayLabel(l)),
+                        whiteSpace: 'nowrap',
+                        textTransform: 'capitalize',
+                      }}
+                    >
+                      {getCallResultDisplayLabel(l)}
+                    </span>
+                  ) : (
+                    <span style={{ color: 'var(--text-muted)', fontSize: '0.78rem' }}>—</span>
+                  )}
+                </div>
+              )}
+              {visibleColumns.language && (
+                <div className="table-cell" style={{ color: 'var(--text-secondary)' }}>
+                  {l.lastCallLanguage || <span style={{ color: 'var(--text-muted)', fontSize: '0.78rem' }}>—</span>}
+                </div>
+              )}
+              {visibleColumns.createdTime && (
+                <div className="table-cell" style={{ color: 'var(--text-muted)', fontSize: '0.78rem' }}>
+                  {new Date(l.createdAt).toLocaleString()}
+                </div>
+              )}
+              {visibleColumns.lastCalled && (
+                <div className="table-cell" style={{ color: 'var(--text-muted)', fontSize: '0.78rem' }}>
+                  {l.lastCalledAt ? new Date(l.lastCalledAt).toLocaleString() : '—'}
+                </div>
+              )}
               <div className="table-cell">
                 <button
                   className="btn btn-secondary"

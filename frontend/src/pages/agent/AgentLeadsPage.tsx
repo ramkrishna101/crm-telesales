@@ -1,9 +1,10 @@
-import { useState, useSyncExternalStore, useEffect } from 'react';
+import { useState, useSyncExternalStore, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { leadsService, callsService, tagsService } from '../../services/crm.service';
 import AppLayout from '../../components/layout/AppLayout';
 import { useIsMobile } from '../../hooks/useIsMobile';
+import DateRangeFilter, { computeRange, type DateRangePreset, type DateRangeValue } from '../../components/ui/DateRangeFilter';
 import Dropdown from '../../components/ui/Dropdown';
 import { 
   Search, User, Phone, Calendar, MessageSquare, 
@@ -28,9 +29,66 @@ interface Lead {
   campaign?: { name: string };
 }
 
+type AgentOptionalColumnKey = 'followupStatus' | 'callResult' | 'campaign' | 'createdTime' | 'lastCalled';
+
+const AGENT_OPTIONAL_COLUMNS: { key: AgentOptionalColumnKey; label: string }[] = [
+  { key: 'followupStatus', label: 'Followup Status' },
+  { key: 'callResult', label: 'Call Result' },
+  { key: 'campaign', label: 'Campaign' },
+  { key: 'createdTime', label: 'Created Time' },
+  { key: 'lastCalled', label: 'Last Called' },
+];
+
+const AGENT_DEFAULT_VISIBLE_COLUMNS: Record<AgentOptionalColumnKey, boolean> = {
+  followupStatus: true,
+  callResult: true,
+  campaign: true,
+  createdTime: true,
+  lastCalled: true,
+};
+
+const AGENT_LEADS_VISIBLE_COLUMNS_STORAGE_KEY = 'agent-leads-visible-columns';
+
+const AGENT_DATE_RANGE_PRESETS: DateRangePreset[] = ['today', 'yesterday', 'last_7_days', 'this_month'];
+
+function getCreatedDateRangeValue(from: string, to: string): DateRangeValue {
+  if (!from && !to) return { preset: 'all_time', from: '', to: '' };
+
+  const normalizedFrom = from || to;
+  const normalizedTo = to || from;
+
+  for (const preset of AGENT_DATE_RANGE_PRESETS) {
+    const range = computeRange(preset);
+    if (range.from === normalizedFrom && range.to === normalizedTo) {
+      return { preset, from: normalizedFrom, to: normalizedTo };
+    }
+  }
+
+  return { preset: 'custom', from: normalizedFrom, to: normalizedTo };
+}
+
+function getAgentTableWidths(visibleOptionalColumnCount: number) {
+  if (visibleOptionalColumnCount <= 0) {
+    return { lead: '420px', optional: '0px', actions: '190px' };
+  }
+
+  if (visibleOptionalColumnCount === 1) {
+    return { lead: '360px', optional: '220px', actions: '190px' };
+  }
+
+  if (visibleOptionalColumnCount === 2) {
+    return { lead: '40%', optional: '22%', actions: '16%' };
+  }
+
+  const lead = 28;
+  const actions = 14;
+  const optional = (100 - lead - actions) / visibleOptionalColumnCount;
+  return { lead: `${lead}%`, optional: `${optional}%`, actions: `${actions}%` };
+}
+
 const FOLLOW_UP_STATUS_OPTIONS: { value: string; label: string }[] = [
-  { value: '', label: 'All followup statuses' },
-  { value: 'uncontacted', label: 'Uncontacted' },
+  { value: '', label: 'All' },
+  { value: 'uncontacted', label: 'New Lead' },
   { value: 'contacted', label: 'Contacted' },
   { value: 'lead', label: 'Interested' },
   { value: 'callback', label: 'Callback' },
@@ -40,7 +98,7 @@ const FOLLOW_UP_STATUS_OPTIONS: { value: string; label: string }[] = [
 ];
 
 const PRIORITY_OPTIONS: { value: string; label: string }[] = [
-  { value: '', label: 'All priorities' },
+  { value: '', label: 'All' },
   { value: 'high', label: 'High' },
   { value: 'normal', label: 'Normal' },
 ];
@@ -56,7 +114,7 @@ const STATUS_COLORS: Record<string, { bg: string; fg: string; dot: string }> = {
 };
 
 const STATUS_LABELS: Record<string, string> = {
-  uncontacted:    'Uncontacted',
+  uncontacted:    'New Lead',
   contacted:      'Contacted',
   lead:           'Interested',
   callback:       'Callback',
@@ -65,48 +123,104 @@ const STATUS_LABELS: Record<string, string> = {
   invalid:        'Invalid',
 };
 
-// Colour palette for disposition tags (last call result)
 const RESULT_COLORS: Record<string, { bg: string; fg: string }> = {
-  'interested':       { bg: '#dcfce7', fg: '#15803d' },
+  'new lead':         { bg: '#e0f2fe', fg: '#0369a1' },
+  interested:         { bg: '#dcfce7', fg: '#15803d' },
   'not interested':   { bg: '#fee2e2', fg: '#b91c1c' },
-  'callback':         { bg: '#fef9c3', fg: '#a16207' },
-  'rnr':              { bg: '#e0e7ff', fg: '#4338ca' },
-  'busy':             { bg: '#ffedd5', fg: '#c2410c' },
-  'dnd':              { bg: '#fce7f3', fg: '#9d174d' },
+  callback:           { bg: '#fef9c3', fg: '#a16207' },
+  rnr:                { bg: '#e0e7ff', fg: '#4338ca' },
+  busy:               { bg: '#ffedd5', fg: '#c2410c' },
+  dnd:                { bg: '#fce7f3', fg: '#9d174d' },
   'invalid number':   { bg: '#f1f5f9', fg: '#64748b' },
 };
+
+function isFreshLead(lead: { status?: string | null; lastCalledAt?: string | null; lastCallResult?: string | null }) {
+  return (lead.status || 'uncontacted') === 'uncontacted' && !lead.lastCalledAt && !lead.lastCallResult;
+}
+
+function getLeadStatusLabel(lead: { status?: string | null; lastCalledAt?: string | null; lastCallResult?: string | null }) {
+  if (isFreshLead(lead)) return 'New Lead';
+  const status = lead.status || 'uncontacted';
+  return STATUS_LABELS[status] || status.replace('_', ' ');
+}
+
+function getLeadCallResultLabel(lead: { status?: string | null; lastCalledAt?: string | null; lastCallResult?: string | null }) {
+  if (lead.lastCallResult) return lead.lastCallResult;
+  return isFreshLead(lead) ? 'New Lead' : 'No call result yet';
+}
 
 export default function AgentLeadsPage() {
   const isMobile = useIsMobile();
   const navigate = useNavigate();
+  const columnMenuRef = useRef<HTMLDivElement>(null);
   const [searchTerm, setSearchTerm] = useState('');
   const [debouncedSearch, setDebouncedSearch] = useState('');
-  // Draft state — bound to the dropdowns. Not used for querying.
   const [draftStatus, setDraftStatus] = useState('');
   const [draftPriority, setDraftPriority] = useState('');
   const [draftCallResult, setDraftCallResult] = useState('');
   const [draftCampaignId, setDraftCampaignId] = useState('');
   const [draftCampaignLabel, setDraftCampaignLabel] = useState('');
-  // Applied state — committed on Apply click; this is what drives the query.
+  const [draftCreatedFrom, setDraftCreatedFrom] = useState('');
+  const [draftCreatedTo, setDraftCreatedTo] = useState('');
   const [statusFilter, setStatusFilter] = useState('');
   const [priorityFilter, setPriorityFilter] = useState('');
   const [callResultFilter, setCallResultFilter] = useState('');
   const [campaignFilter, setCampaignFilter] = useState('');
   const [campaignFilterLabel, setCampaignFilterLabel] = useState('');
+  const [createdFromFilter, setCreatedFromFilter] = useState('');
+  const [createdToFilter, setCreatedToFilter] = useState('');
   const [page, setPage] = useState(1);
   const PAGE_SIZE = 20;
   const [selectedLeadId, setSelectedLeadId] = useState<string | null>(null);
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [isFilterSheetOpen, setIsFilterSheetOpen] = useState(false);
+  const [isColumnMenuOpen, setIsColumnMenuOpen] = useState(false);
+  const [visibleColumns, setVisibleColumns] = useState<Record<AgentOptionalColumnKey, boolean>>(() => {
+    if (typeof window === 'undefined') return AGENT_DEFAULT_VISIBLE_COLUMNS;
+
+    try {
+      const rawValue = window.localStorage.getItem(AGENT_LEADS_VISIBLE_COLUMNS_STORAGE_KEY);
+      if (!rawValue) return AGENT_DEFAULT_VISIBLE_COLUMNS;
+      const parsedValue = JSON.parse(rawValue) as Partial<Record<AgentOptionalColumnKey, boolean>>;
+      return { ...AGENT_DEFAULT_VISIBLE_COLUMNS, ...parsedValue };
+    } catch {
+      return AGENT_DEFAULT_VISIBLE_COLUMNS;
+    }
+  });
+  const [draftVisibleColumns, setDraftVisibleColumns] = useState<Record<AgentOptionalColumnKey, boolean>>(visibleColumns);
+
+  useEffect(() => {
+    if (!isColumnMenuOpen) return;
+
+    const handlePointerDown = (event: MouseEvent) => {
+      if (!columnMenuRef.current?.contains(event.target as Node)) {
+        setIsColumnMenuOpen(false);
+      }
+    };
+
+    document.addEventListener('mousedown', handlePointerDown);
+    return () => document.removeEventListener('mousedown', handlePointerDown);
+  }, [isColumnMenuOpen]);
+
+  useEffect(() => {
+    if (!isColumnMenuOpen) return;
+    setDraftVisibleColumns(visibleColumns);
+  }, [isColumnMenuOpen, visibleColumns]);
 
   const hasUnapplied =
     draftStatus !== statusFilter ||
     draftPriority !== priorityFilter ||
     draftCallResult !== callResultFilter ||
-    draftCampaignId !== campaignFilter;
+    draftCampaignId !== campaignFilter ||
+    draftCreatedFrom !== createdFromFilter ||
+    draftCreatedTo !== createdToFilter;
 
   const hasActiveFilters =
-    !!(statusFilter || priorityFilter || callResultFilter || campaignFilter || draftStatus || draftPriority || draftCallResult || draftCampaignId);
+    !!(
+      statusFilter || priorityFilter || callResultFilter || campaignFilter || createdFromFilter || createdToFilter ||
+      draftStatus || draftPriority || draftCallResult || draftCampaignId || draftCreatedFrom || draftCreatedTo
+    );
+  const draftCreatedRange = getCreatedDateRangeValue(draftCreatedFrom, draftCreatedTo);
 
   const updateDraftCampaign = (value: string, label?: string) => {
     setDraftCampaignId(value);
@@ -136,6 +250,8 @@ export default function AgentLeadsPage() {
     setCallResultFilter(draftCallResult);
     setCampaignFilter(draftCampaignId);
     setCampaignFilterLabel(draftCampaignId ? (draftCampaignLabel || campaignFilterLabel || 'Selected campaign') : '');
+    setCreatedFromFilter(draftCreatedFrom);
+    setCreatedToFilter(draftCreatedTo);
   };
 
   const resetFilters = () => {
@@ -144,11 +260,15 @@ export default function AgentLeadsPage() {
     setDraftCallResult('');
     setDraftCampaignId('');
     setDraftCampaignLabel('');
+    setDraftCreatedFrom('');
+    setDraftCreatedTo('');
     setStatusFilter('');
     setPriorityFilter('');
     setCallResultFilter('');
     setCampaignFilter('');
     setCampaignFilterLabel('');
+    setCreatedFromFilter('');
+    setCreatedToFilter('');
   };
 
   // Debounce the search input so we don't hammer the server on every keystroke.
@@ -160,10 +280,10 @@ export default function AgentLeadsPage() {
   // Reset to page 1 whenever filters/search change.
   useEffect(() => {
     setPage(1);
-  }, [debouncedSearch, statusFilter, priorityFilter, callResultFilter, campaignFilter]);
+  }, [debouncedSearch, statusFilter, priorityFilter, callResultFilter, campaignFilter, createdFromFilter, createdToFilter]);
 
   const { data, isLoading, isFetching } = useQuery({
-    queryKey: ['agent-leads', statusFilter, priorityFilter, callResultFilter, campaignFilter, debouncedSearch, page],
+    queryKey: ['agent-leads', statusFilter, priorityFilter, callResultFilter, campaignFilter, createdFromFilter, createdToFilter, debouncedSearch, page],
     queryFn: () =>
       leadsService.list({
         page,
@@ -172,6 +292,8 @@ export default function AgentLeadsPage() {
         ...(priorityFilter ? { priority: priorityFilter } : {}),
         ...(callResultFilter ? { callResult: callResultFilter } : {}),
         ...(campaignFilter ? { campaignId: campaignFilter } : {}),
+        ...(createdFromFilter ? { from: createdFromFilter } : {}),
+        ...(createdToFilter ? { to: createdToFilter } : {}),
         ...(debouncedSearch ? { q: debouncedSearch } : {}),
       }),
     placeholderData: (prev) => prev,
@@ -193,6 +315,24 @@ export default function AgentLeadsPage() {
   const rangeStart = total === 0 ? 0 : (page - 1) * PAGE_SIZE + 1;
   const rangeEnd = Math.min(page * PAGE_SIZE, total);
   const filteredLeads = leads;
+  const visibleOptionalColumns = AGENT_OPTIONAL_COLUMNS.filter((column) => visibleColumns[column.key]);
+  const tableWidths = getAgentTableWidths(visibleOptionalColumns.length);
+  const useCompactTableLayout = visibleOptionalColumns.length <= 1;
+  const toggleDraftColumn = (key: AgentOptionalColumnKey) =>
+    setDraftVisibleColumns((current) => ({ ...current, [key]: !current[key] }));
+  const selectAllColumns = () => setDraftVisibleColumns(AGENT_DEFAULT_VISIBLE_COLUMNS);
+  const hasPendingColumnChanges = AGENT_OPTIONAL_COLUMNS.some((column) => draftVisibleColumns[column.key] !== visibleColumns[column.key]);
+  const cancelColumnChanges = () => {
+    setDraftVisibleColumns(visibleColumns);
+    setIsColumnMenuOpen(false);
+  };
+  const applyColumnChanges = () => {
+    setVisibleColumns(draftVisibleColumns);
+    if (typeof window !== 'undefined') {
+      window.localStorage.setItem(AGENT_LEADS_VISIBLE_COLUMNS_STORAGE_KEY, JSON.stringify(draftVisibleColumns));
+    }
+    setIsColumnMenuOpen(false);
+  };
   const campaignOptionMap = new Map<string, string>();
 
   leads.forEach((lead) => {
@@ -202,7 +342,7 @@ export default function AgentLeadsPage() {
   });
 
   const campaignOptions = [
-    { value: '', label: 'All campaigns' },
+    { value: '', label: 'All' },
     ...Array.from(campaignOptionMap.entries())
       .sort((left, right) => left[1].localeCompare(right[1]))
       .map(([value, label]) => ({ value, label })),
@@ -334,7 +474,7 @@ export default function AgentLeadsPage() {
                     <div className="agent-mobile-chip-stack">
                       <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6, background: colors.bg, color: colors.fg, fontSize: '0.7rem', fontWeight: 600, padding: '4px 10px', borderRadius: 999, textTransform: 'capitalize' }}>
                         <span style={{ width: 6, height: 6, borderRadius: '50%', background: colors.dot }} />
-                        {STATUS_LABELS[selectedLead.status] || selectedLead.status.replace('_', ' ')}
+                        {getLeadStatusLabel(selectedLead)}
                       </span>
                       <span className="badge" style={{ background: selectedLead.priority === 'high' ? '#fef2f2' : '#eef2f7', color: selectedLead.priority === 'high' ? '#dc2626' : '#475569' }}>
                         {selectedLead.priority}
@@ -345,12 +485,12 @@ export default function AgentLeadsPage() {
                   <div className="agent-mobile-detail-grid">
                     <div className="agent-mobile-detail-row"><Hash size={13} /> <span>{selectedLead.campaign?.name || 'Standard'}</span></div>
                     <div className="agent-mobile-detail-row"><Clock size={13} /> <span>{selectedLead.lastCalledAt ? new Date(selectedLead.lastCalledAt).toLocaleDateString() : 'Never called'}</span></div>
-                    <div className="agent-mobile-detail-row"><MessageSquare size={13} /> <span>{selectedLead.lastCallResult || 'No call result yet'}</span></div>
+                    <div className="agent-mobile-detail-row"><MessageSquare size={13} /> <span>{getLeadCallResultLabel(selectedLead)}</span></div>
                   </div>
 
                   <div className="agent-mobile-detail-grid agent-mobile-detail-grid--split">
                     <div className="agent-mobile-detail-row"><Languages size={13} /> <span>{selectedLead.lastCallLanguage || 'Language not captured'}</span></div>
-                    <div className="agent-mobile-detail-row"><Calendar size={13} /> <span>{new Date(selectedLead.createdAt).toLocaleDateString()}</span></div>
+                    <div className="agent-mobile-detail-row"><Calendar size={13} /> <span>{new Date(selectedLead.createdAt).toLocaleString()}</span></div>
                   </div>
 
                   <div className="agent-mobile-note-preview">
@@ -474,6 +614,19 @@ export default function AgentLeadsPage() {
                       height={42}
                     />
                   </div>
+                  <div className="agent-mobile-sheet__field">
+                    <div className="agent-mobile-sheet__label">Created</div>
+                    <DateRangeFilter
+                      value={draftCreatedRange}
+                      onChange={(next) => {
+                        setDraftCreatedFrom(next.from);
+                        setDraftCreatedTo(next.to);
+                      }}
+                      includeAllTime
+                      allTimeLabel="All Data"
+                      fullWidth
+                    />
+                  </div>
                 </div>
 
                 <div className="agent-mobile-sheet__actions">
@@ -515,80 +668,107 @@ export default function AgentLeadsPage() {
         <div className="card" style={{ border: 'none', background: 'transparent' }}>
           <div
             style={{
-              display: 'grid',
-              gridTemplateColumns: '1fr 170px 170px 170px 150px auto',
+              display: 'flex',
+              flexWrap: 'wrap',
               gap: 8,
               marginBottom: 14,
-              alignItems: 'center',
+              alignItems: 'flex-end',
             }}
           >
-            <div
-              className="search-box"
-              style={{
-                background: 'var(--bg-surface)',
-                border: '1px solid var(--border)',
-                padding: '6px 12px',
-                borderRadius: 8,
-                display: 'flex',
-                alignItems: 'center',
-                gap: 8,
-              }}
-            >
-              <Search size={15} style={{ color: 'var(--text-muted)' }} />
-              <input
-                type="text"
-                className="search-input"
-                placeholder="Search name, phone, email..."
-                value={searchTerm}
-                onChange={(e) => setSearchTerm(e.target.value)}
+            <div className="form-group" style={{ minWidth: 220, flex: '1 1 280px' }}>
+              <label className="form-label">Search</label>
+              <div
                 style={{
-                  background: 'none',
-                  border: 'none',
-                  width: '100%',
-                  fontSize: '0.85rem',
-                  color: 'var(--text-primary)',
-                  outline: 'none',
+                  background: 'var(--bg-surface)',
+                  border: '1px solid var(--border)',
+                  padding: '6px 12px',
+                  borderRadius: 8,
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 8,
+                  height: 36,
                 }}
+              >
+                <Search size={15} style={{ color: 'var(--text-muted)' }} />
+                <input
+                  type="text"
+                  className="search-input"
+                  placeholder="Search name, phone, email..."
+                  value={searchTerm}
+                  onChange={(e) => setSearchTerm(e.target.value)}
+                  style={{
+                    background: 'none',
+                    border: 'none',
+                    width: '100%',
+                    fontSize: '0.85rem',
+                    color: 'var(--text-primary)',
+                    outline: 'none',
+                  }}
+                />
+              </div>
+            </div>
+            <div className="form-group" style={{ width: 170 }}>
+              <label className="form-label">Campaign</label>
+              <Dropdown
+                value={draftCampaignId}
+                onChange={handleCampaignChange}
+                placeholder="All"
+                options={campaignOptions}
               />
             </div>
-            <Dropdown
-              value={draftCampaignId}
-              onChange={handleCampaignChange}
-              placeholder="All campaigns"
-              options={campaignOptions}
-            />
-            <Dropdown
-              value={draftStatus}
-              onChange={setDraftStatus}
-              placeholder="All followup statuses"
-              options={FOLLOW_UP_STATUS_OPTIONS.map((o) => ({
-                value: o.value,
-                label: o.label,
-                colour: o.value ? STATUS_COLORS[o.value]?.dot : undefined,
-              }))}
-            />
-            <Dropdown
-              value={draftCallResult}
-              onChange={setDraftCallResult}
-              placeholder="All call results"
-              options={[
-                { value: '', label: 'All call results' },
-                ...dispositionTags.map((t) => {
-                  const key = t.name.toLowerCase();
-                  return {
-                    value: t.name,
-                    label: t.name,
-                    colour: t.color || RESULT_COLORS[key]?.fg,
-                  };
-                }),
-              ]}
-            />
-            <Dropdown
-              value={draftPriority}
-              onChange={setDraftPriority}
-              placeholder="All priorities"
-              options={PRIORITY_OPTIONS}
-            />
+            <div className="form-group" style={{ width: 170 }}>
+              <label className="form-label">Followup Status</label>
+              <Dropdown
+                value={draftStatus}
+                onChange={setDraftStatus}
+                placeholder="All"
+                options={FOLLOW_UP_STATUS_OPTIONS.map((o) => ({
+                  value: o.value,
+                  label: o.label,
+                  colour: o.value ? STATUS_COLORS[o.value]?.dot : undefined,
+                }))}
+              />
+            </div>
+            <div className="form-group" style={{ width: 170 }}>
+              <label className="form-label">Call Result</label>
+              <Dropdown
+                value={draftCallResult}
+                onChange={setDraftCallResult}
+                placeholder="All"
+                options={[
+                  { value: '', label: 'All' },
+                  ...dispositionTags.map((t) => {
+                    const key = t.name.toLowerCase();
+                    return {
+                      value: t.name,
+                      label: t.name,
+                      colour: t.color || RESULT_COLORS[key]?.fg,
+                    };
+                  }),
+                ]}
+              />
+            </div>
+            <div className="form-group" style={{ width: 150 }}>
+              <label className="form-label">Priority</label>
+              <Dropdown
+                value={draftPriority}
+                onChange={setDraftPriority}
+                placeholder="All"
+                options={PRIORITY_OPTIONS}
+              />
+            </div>
+            <div className="form-group" style={{ minWidth: 180 }}>
+              <label className="form-label">Created</label>
+              <DateRangeFilter
+                value={draftCreatedRange}
+                onChange={(next) => {
+                  setDraftCreatedFrom(next.from);
+                  setDraftCreatedTo(next.to);
+                }}
+                includeAllTime
+                allTimeLabel="All Data"
+              />
+            </div>
             <div style={{ display: 'flex', gap: 6 }}>
               <button
                 type="button"
@@ -632,30 +812,127 @@ export default function AgentLeadsPage() {
 
           <div className="card" style={{ overflow: 'hidden' }}>
             <div className="table-container">
-              <table className="table" style={{ width: '100%', tableLayout: 'fixed', borderCollapse: 'separate', borderSpacing: 0 }}>
+              <table
+                className="table"
+                style={{
+                  width: useCompactTableLayout ? 'max-content' : '100%',
+                  minWidth: useCompactTableLayout ? undefined : '100%',
+                  tableLayout: useCompactTableLayout ? 'auto' : 'fixed',
+                  borderCollapse: 'separate',
+                  borderSpacing: 0,
+                }}
+              >
                 <colgroup>
-                  <col style={{ width: '32%' }} />
-                  <col style={{ width: '13%' }} />
-                  <col style={{ width: '14%' }} />
-                  <col style={{ width: '14%' }} />
-                  <col style={{ width: '12%' }} />
-                  <col style={{ width: '15%' }} />
+                  <col style={{ width: tableWidths.lead }} />
+                  {visibleColumns.followupStatus && <col style={{ width: tableWidths.optional }} />}
+                  {visibleColumns.callResult && <col style={{ width: tableWidths.optional }} />}
+                  {visibleColumns.campaign && <col style={{ width: tableWidths.optional }} />}
+                  {visibleColumns.createdTime && <col style={{ width: tableWidths.optional }} />}
+                  {visibleColumns.lastCalled && <col style={{ width: tableWidths.optional }} />}
+                  <col style={{ width: tableWidths.actions }} />
                 </colgroup>
                 <thead style={{ background: 'var(--bg-elevated)' }}>
                   <tr>
                     <th style={{ padding: '14px 20px', textAlign: 'left', fontSize: '0.7rem', textTransform: 'uppercase', color: 'var(--text-muted)', letterSpacing: '0.06em', fontWeight: 600 }}>Lead</th>
-                    <th style={{ padding: '14px 16px', textAlign: 'left', fontSize: '0.7rem', textTransform: 'uppercase', color: 'var(--text-muted)', letterSpacing: '0.06em', fontWeight: 600 }}>Followup Status</th>
-                    <th style={{ padding: '14px 16px', textAlign: 'left', fontSize: '0.7rem', textTransform: 'uppercase', color: 'var(--text-muted)', letterSpacing: '0.06em', fontWeight: 600 }}>Call Result</th>
-                    <th style={{ padding: '14px 16px', textAlign: 'left', fontSize: '0.7rem', textTransform: 'uppercase', color: 'var(--text-muted)', letterSpacing: '0.06em', fontWeight: 600 }}>Campaign</th>
-                    <th style={{ padding: '14px 16px', textAlign: 'left', fontSize: '0.7rem', textTransform: 'uppercase', color: 'var(--text-muted)', letterSpacing: '0.06em', fontWeight: 600 }}>Last Called</th>
-                    <th style={{ padding: '14px 20px', textAlign: 'right', fontSize: '0.7rem', textTransform: 'uppercase', color: 'var(--text-muted)', letterSpacing: '0.06em', fontWeight: 600 }}>Actions</th>
+                    {visibleColumns.followupStatus && <th style={{ padding: '14px 16px', textAlign: 'left', fontSize: '0.7rem', textTransform: 'uppercase', color: 'var(--text-muted)', letterSpacing: '0.06em', fontWeight: 600 }}>Followup Status</th>}
+                    {visibleColumns.callResult && <th style={{ padding: '14px 16px', textAlign: 'left', fontSize: '0.7rem', textTransform: 'uppercase', color: 'var(--text-muted)', letterSpacing: '0.06em', fontWeight: 600 }}>Call Result</th>}
+                    {visibleColumns.campaign && <th style={{ padding: '14px 16px', textAlign: 'left', fontSize: '0.7rem', textTransform: 'uppercase', color: 'var(--text-muted)', letterSpacing: '0.06em', fontWeight: 600 }}>Campaign</th>}
+                    {visibleColumns.createdTime && <th style={{ padding: '14px 16px', textAlign: 'left', fontSize: '0.7rem', textTransform: 'uppercase', color: 'var(--text-muted)', letterSpacing: '0.06em', fontWeight: 600 }}>Created Time</th>}
+                    {visibleColumns.lastCalled && <th style={{ padding: '14px 16px', textAlign: 'left', fontSize: '0.7rem', textTransform: 'uppercase', color: 'var(--text-muted)', letterSpacing: '0.06em', fontWeight: 600 }}>Last Called</th>}
+                    <th style={{ padding: '14px 20px', textAlign: 'right', fontSize: '0.7rem', textTransform: 'uppercase', color: 'var(--text-muted)', letterSpacing: '0.06em', fontWeight: 600 }}>
+                      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: 8 }}>
+                        <span>Actions</span>
+                        <div ref={columnMenuRef} style={{ position: 'relative' }}>
+                          <button
+                            type="button"
+                            className="btn btn-secondary"
+                            onClick={() => setIsColumnMenuOpen((open) => !open)}
+                            title="Manage columns"
+                            aria-label="Manage columns"
+                            style={{ height: 30, width: 30, minWidth: 30, padding: 0, display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}
+                          >
+                            <SlidersHorizontal size={14} />
+                          </button>
+                          {isColumnMenuOpen && (
+                            <div
+                              style={{
+                                position: 'absolute',
+                                top: 'calc(100% + 8px)',
+                                right: 0,
+                                width: 220,
+                                background: 'var(--bg-surface)',
+                                border: '1px solid var(--border)',
+                                borderRadius: 12,
+                                boxShadow: '0 18px 48px rgba(15, 23, 42, 0.16)',
+                                padding: 10,
+                                zIndex: 30,
+                              }}
+                            >
+                              <div style={{ fontSize: '0.74rem', fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.06em', padding: '4px 6px 8px' }}>
+                                Visible Columns
+                              </div>
+                              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '0 6px 8px' }}>
+                                <button
+                                  type="button"
+                                  onClick={selectAllColumns}
+                                  style={{ border: 'none', background: 'transparent', padding: 0, fontSize: '0.8rem', fontWeight: 600, color: '#4f46e5', cursor: 'pointer' }}
+                                >
+                                  Select All
+                                </button>
+                              </div>
+                              <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+                                {AGENT_OPTIONAL_COLUMNS.map((column) => (
+                                  <label
+                                    key={column.key}
+                                    style={{
+                                      display: 'flex',
+                                      alignItems: 'center',
+                                      gap: 10,
+                                      padding: '8px 10px',
+                                      borderRadius: 8,
+                                      cursor: 'pointer',
+                                      color: 'var(--text-primary)',
+                                      fontSize: '0.85rem',
+                                    }}
+                                  >
+                                    <input
+                                      type="checkbox"
+                                      checked={draftVisibleColumns[column.key]}
+                                      onChange={() => toggleDraftColumn(column.key)}
+                                    />
+                                    <span>{column.label}</span>
+                                  </label>
+                                ))}
+                              </div>
+                              <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, paddingTop: 8 }}>
+                                <button
+                                  type="button"
+                                  onClick={cancelColumnChanges}
+                                  style={{ height: 30, padding: '0 10px', fontSize: '0.78rem', fontWeight: 600, borderRadius: 8, border: '1px solid #cbd5e1', cursor: 'pointer', background: 'var(--bg-surface)', color: '#475569' }}
+                                >
+                                  Cancel
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={applyColumnChanges}
+                                  disabled={!hasPendingColumnChanges}
+                                  style={{ height: 30, padding: '0 10px', fontSize: '0.78rem', fontWeight: 600, borderRadius: 8, border: 'none', cursor: hasPendingColumnChanges ? 'pointer' : 'not-allowed', background: hasPendingColumnChanges ? '#4f46e5' : '#cbd5e1', color: '#fff' }}
+                                >
+                                  Apply
+                                </button>
+                              </div>
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    </th>
                   </tr>
                 </thead>
                 <tbody style={{ background: 'var(--bg-surface)' }}>
                   {isLoading ? (
-                    <tr><td colSpan={6}><div className="empty-state">Loading your leads...</div></td></tr>
+                    <tr><td colSpan={7}><div className="empty-state">Loading your leads...</div></td></tr>
                   ) : filteredLeads.length === 0 ? (
-                    <tr><td colSpan={6}><div className="empty-state">No leads match the current filters.</div></td></tr>
+                    <tr><td colSpan={7}><div className="empty-state">No leads match the current filters.</div></td></tr>
                   ) : (
                     filteredLeads.map((lead) => {
                       const colors = STATUS_COLORS[lead.status] || STATUS_COLORS.uncontacted;
@@ -703,40 +980,57 @@ export default function AgentLeadsPage() {
                             </div>
                           </div>
                         </td>
-                        <td style={{ padding: '14px 16px' }}>
-                          <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6, background: colors.bg, color: colors.fg, fontSize: '0.7rem', fontWeight: 600, padding: '4px 10px', borderRadius: 999, textTransform: 'capitalize' }}>
-                            <span style={{ width: 6, height: 6, borderRadius: '50%', background: colors.dot }} />
-                            {STATUS_LABELS[lead.status] || lead.status.replace('_', ' ')}
-                          </span>
-                        </td>
-                        <td style={{ padding: '14px 16px' }}>
-                          {lead.lastCallResult ? (() => {
-                            const r = RESULT_COLORS[lead.lastCallResult.toLowerCase()] || { bg: '#f1f5f9', fg: '#475569' };
-                            return (
-                              <span style={{ display: 'inline-block', background: r.bg, color: r.fg, fontSize: '0.7rem', fontWeight: 600, padding: '4px 10px', borderRadius: 999, textTransform: 'capitalize', whiteSpace: 'nowrap' }}>
-                                {lead.lastCallResult}
-                              </span>
-                            );
-                          })() : (
-                            <span style={{ color: 'var(--text-muted)', fontSize: '0.8rem', fontStyle: 'italic' }}>—</span>
-                          )}
-                        </td>
-                        <td style={{ padding: '14px 16px' }}>
-                          <span style={{ fontSize: '0.85rem', color: 'var(--text-secondary)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', display: 'inline-block', maxWidth: '100%' }}>
-                            {lead.campaign?.name || 'Standard'}
-                          </span>
-                        </td>
-                        <td style={{ padding: '14px 16px' }}>
-                          {lead.lastCalledAt ? (
-                            <div style={{ display: 'flex', alignItems: 'center', gap: 6, color: 'var(--text-secondary)', fontSize: '0.85rem' }}>
-                              <Clock size={13} /> {new Date(lead.lastCalledAt).toLocaleDateString()}
+                        {visibleColumns.followupStatus && (
+                          <td style={{ padding: '14px 16px' }}>
+                            <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6, background: colors.bg, color: colors.fg, fontSize: '0.7rem', fontWeight: 600, padding: '4px 10px', borderRadius: 999, textTransform: 'capitalize' }}>
+                              <span style={{ width: 6, height: 6, borderRadius: '50%', background: colors.dot }} />
+                              {getLeadStatusLabel(lead)}
+                            </span>
+                          </td>
+                        )}
+                        {visibleColumns.callResult && (
+                          <td style={{ padding: '14px 16px' }}>
+                            {(() => {
+                              const callResultLabel = lead.lastCallResult || (isFreshLead(lead) ? 'New Lead' : '');
+                              if (!callResultLabel) {
+                                return <span style={{ color: 'var(--text-muted)', fontSize: '0.8rem', fontStyle: 'italic' }}>—</span>;
+                              }
+                              const r = RESULT_COLORS[callResultLabel.toLowerCase()] || { bg: '#f1f5f9', fg: '#475569' };
+                              return (
+                                <span style={{ display: 'inline-block', background: r.bg, color: r.fg, fontSize: '0.7rem', fontWeight: 600, padding: '4px 10px', borderRadius: 999, textTransform: 'capitalize', whiteSpace: 'nowrap' }}>
+                                  {callResultLabel}
+                                </span>
+                              );
+                            })()}
+                          </td>
+                        )}
+                        {visibleColumns.campaign && (
+                          <td style={{ padding: '14px 16px' }}>
+                            <span style={{ fontSize: '0.85rem', color: 'var(--text-secondary)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', display: 'inline-block', maxWidth: '100%' }}>
+                              {lead.campaign?.name || 'Standard'}
+                            </span>
+                          </td>
+                        )}
+                        {visibleColumns.createdTime && (
+                          <td style={{ padding: '14px 16px' }}>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: 6, color: 'var(--text-secondary)', fontSize: '0.8rem' }}>
+                              <Calendar size={13} /> {new Date(lead.createdAt).toLocaleString()}
                             </div>
-                          ) : (
-                            <span style={{ color: 'var(--text-muted)', fontSize: '0.8rem', fontStyle: 'italic' }}>Never</span>
-                          )}
-                        </td>
+                          </td>
+                        )}
+                        {visibleColumns.lastCalled && (
+                          <td style={{ padding: '14px 16px' }}>
+                            {lead.lastCalledAt ? (
+                              <div style={{ display: 'flex', alignItems: 'center', gap: 6, color: 'var(--text-secondary)', fontSize: '0.85rem' }}>
+                                <Clock size={13} /> {new Date(lead.lastCalledAt).toLocaleDateString()}
+                              </div>
+                            ) : (
+                              <span style={{ color: 'var(--text-muted)', fontSize: '0.8rem', fontStyle: 'italic' }}>Never</span>
+                            )}
+                          </td>
+                        )}
                         <td style={{ padding: '14px 20px', textAlign: 'right' }}>
-                          <div style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+                          <div style={{ display: 'inline-flex', alignItems: 'center', gap: 6, justifyContent: 'flex-end', width: '100%', whiteSpace: 'nowrap' }}>
                             <button
                               style={{
                                 display: 'inline-flex', alignItems: 'center', gap: 6,
@@ -929,6 +1223,7 @@ function LeadDetailsModal({ leadId, onClose }: { leadId: string, onClose: () => 
   const comments = lead?.comments || [];
   const dispositionTags: { name: string; color?: string | null }[] = tagsData?.data?.data || tagsData?.data || [];
   const latestCallResult = history[0]?.dispositionTag || '';
+  const showNewLeadState = isFreshLead({ status: lead?.status, lastCalledAt: lead?.lastCalledAt || null, lastCallResult: latestCallResult || null });
   const hasStatusChange = Boolean(statusDraft && statusDraft !== (lead?.status || ''));
   const hasCallResultChange = Boolean(callResultDraft && callResultDraft !== latestCallResult);
 
@@ -961,7 +1256,7 @@ function LeadDetailsModal({ leadId, onClose }: { leadId: string, onClose: () => 
 
   const statusKey = (lead.status || 'uncontacted') as keyof typeof STATUS_COLORS;
   const statusTheme = STATUS_COLORS[statusKey] || STATUS_COLORS.uncontacted;
-  const statusLabel = STATUS_LABELS[lead.status] || (lead.status || 'uncontacted').replace('_', ' ');
+  const statusLabel = getLeadStatusLabel({ status: lead.status, lastCalledAt: lead.lastCalledAt, lastCallResult: latestCallResult || null });
 
   return (
     <div style={overlayStyle} onClick={onClose}>
@@ -1123,7 +1418,7 @@ function LeadDetailsModal({ leadId, onClose }: { leadId: string, onClose: () => 
                       value={callResultDraft}
                       onChange={setCallResultDraft}
                       options={dispositionTags.map((tag) => ({ value: tag.name, label: tag.name, colour: tag.color || undefined }))}
-                      placeholder="Select call result"
+                      placeholder={showNewLeadState ? 'New Lead' : 'Select call result'}
                       height={30}
                     />
                   </div>

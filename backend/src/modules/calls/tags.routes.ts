@@ -5,6 +5,7 @@ import { authenticate, requireRole } from '../../middleware/auth';
 import { AppError } from '../../middleware/errorHandler';
 import { param } from '../../lib/params';
 import { ADMIN_ROLES } from '../../lib/access';
+import { ensureSystemDispositionTags } from './systemTags';
 
 const router = Router();
 router.use(authenticate);
@@ -22,6 +23,7 @@ const updateTagSchema = createTagSchema.partial();
 
 router.get('/', async (_req: Request, res: Response, next: NextFunction) => {
   try {
+    await ensureSystemDispositionTags(prisma);
     const tags = await prisma.dispositionTag.findMany({
       orderBy: [{ isSystem: 'desc' }, { name: 'asc' }],
       include: { createdBy: { select: { id: true, name: true } } },

@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Calendar, ChevronDown } from 'lucide-react';
 
-export type DateRangePreset = 'today' | 'yesterday' | 'this_month' | 'last_7_days' | 'custom';
+export type DateRangePreset = 'all_time' | 'today' | 'yesterday' | 'this_month' | 'last_7_days' | 'custom';
 
 export interface DateRangeValue {
   preset: DateRangePreset;
@@ -19,6 +19,7 @@ function toIstYmd(d: Date): string {
 export function computeRange(preset: DateRangePreset, customFrom?: string, customTo?: string): { from: string; to: string } {
   const now = new Date();
   const today = toIstYmd(now);
+  if (preset === 'all_time') return { from: '', to: '' };
   if (preset === 'today') return { from: today, to: today };
   if (preset === 'yesterday') {
     const y = toIstYmd(new Date(now.getTime() - 24 * 60 * 60 * 1000));
@@ -38,6 +39,7 @@ export function computeRange(preset: DateRangePreset, customFrom?: string, custo
 }
 
 const PRESET_LABELS: Record<DateRangePreset, string> = {
+  all_time: 'All Time',
   today: 'Today',
   yesterday: 'Yesterday',
   this_month: 'This Month',
@@ -46,6 +48,7 @@ const PRESET_LABELS: Record<DateRangePreset, string> = {
 };
 
 function formatRangeLabel(value: DateRangeValue): string {
+  if (value.preset === 'all_time') return PRESET_LABELS.all_time;
   if (value.preset !== 'custom') return PRESET_LABELS[value.preset];
   if (value.from === value.to) return value.from;
   return `${value.from} → ${value.to}`;
@@ -54,9 +57,15 @@ function formatRangeLabel(value: DateRangeValue): string {
 export default function DateRangeFilter({
   value,
   onChange,
+  includeAllTime = false,
+  allTimeLabel = 'All Time',
+  fullWidth = false,
 }: {
   value: DateRangeValue;
   onChange: (next: DateRangeValue) => void;
+  includeAllTime?: boolean;
+  allTimeLabel?: string;
+  fullWidth?: boolean;
 }) {
   const [open, setOpen] = useState(false);
   const [draftFrom, setDraftFrom] = useState(value.from);
@@ -83,14 +92,29 @@ export default function DateRangeFilter({
   }, [open]);
 
   const presets: DateRangePreset[] = useMemo(
-    () => ['today', 'yesterday', 'last_7_days', 'this_month'],
-    [],
+    () => (
+      includeAllTime
+        ? ['all_time', 'today', 'yesterday', 'last_7_days', 'this_month']
+        : ['today', 'yesterday', 'last_7_days', 'this_month']
+    ),
+    [includeAllTime],
   );
 
   const pickPreset = (p: DateRangePreset) => {
+    if (p === 'all_time') {
+      onChange({ preset: 'all_time', from: '', to: '' });
+      setOpen(false);
+      return;
+    }
+
     const r = computeRange(p);
     onChange({ preset: p, from: r.from, to: r.to });
     setOpen(false);
+  };
+
+  const presetLabels: Record<DateRangePreset, string> = {
+    ...PRESET_LABELS,
+    all_time: allTimeLabel,
   };
 
   const applyCustom = () => {
@@ -107,6 +131,7 @@ export default function DateRangeFilter({
         onClick={() => setOpen((o) => !o)}
         style={{
           display: 'flex', alignItems: 'center', gap: 8,
+          width: fullWidth ? '100%' : undefined,
           padding: '8px 12px', height: 38, borderRadius: 8,
           border: `1px solid ${open ? '#4f46e5' : 'var(--border, #cbd5e1)'}`,
           background: '#fff', color: '#0f172a', fontSize: 13, fontWeight: 500,
@@ -116,10 +141,10 @@ export default function DateRangeFilter({
         }}
       >
         <Calendar size={15} style={{ color: '#64748b' }} />
-        <span>{formatRangeLabel(value)}</span>
+        <span>{value.preset === 'all_time' ? allTimeLabel : formatRangeLabel(value)}</span>
         <ChevronDown
           size={15}
-          style={{ color: '#64748b', transform: open ? 'rotate(180deg)' : 'none', transition: 'transform 120ms' }}
+          style={{ marginLeft: 'auto', color: '#64748b', transform: open ? 'rotate(180deg)' : 'none', transition: 'transform 120ms' }}
         />
       </button>
       {open && (
@@ -150,7 +175,7 @@ export default function DateRangeFilter({
                   onMouseEnter={(e) => { if (!active) (e.currentTarget as HTMLButtonElement).style.background = '#f8fafc'; }}
                   onMouseLeave={(e) => { if (!active) (e.currentTarget as HTMLButtonElement).style.background = 'transparent'; }}
                 >
-                  {PRESET_LABELS[p]}
+                  {presetLabels[p]}
                 </button>
               );
             })}

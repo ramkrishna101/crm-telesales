@@ -2699,7 +2699,7 @@ input, textarea, select { font-family: inherit; }
 .campaign-list__header,
 .campaign-list__row {
   display: grid;
-  grid-template-columns: minmax(220px, 2.2fr) 0.9fr 0.9fr 0.9fr 0.9fr 0.8fr 1fr 1fr auto;
+  grid-template-columns: minmax(220px, 2.2fr) 0.9fr 0.9fr 0.9fr 0.9fr 0.8fr 1fr 1fr 164px;
   gap: 16px;
   align-items: center;
 }
@@ -2921,7 +2921,7 @@ textarea.form-input { resize: vertical; min-height: 64px; }
 @media (max-width: 1180px) {
   .campaign-list__header,
   .campaign-list__row {
-    grid-template-columns: minmax(220px, 2fr) repeat(5, minmax(0, 0.85fr)) 1fr auto;
+    grid-template-columns: minmax(220px, 2fr) repeat(5, minmax(0, 0.85fr)) 1fr 164px;
   }
 }
 

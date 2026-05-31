@@ -1,18 +1,9 @@
 import { PrismaClient, Role, CampaignType, CampaignStatus, Priority, BranchStatus } from '@prisma/client';
 import bcrypt from 'bcryptjs';
+import { ensureSystemDispositionTags } from '../src/modules/calls/systemTags';
 
 const prisma = new PrismaClient();
 const DEFAULT_BRANCH_CODE = 'primary';
-
-const SYSTEM_TAGS = [
-  { name: 'RNR', colour: '#f59e0b', isSystem: true },
-  { name: 'Busy', colour: '#f97316', isSystem: true },
-  { name: 'Interested', colour: '#22c55e', isSystem: true },
-  { name: 'Not Interested', colour: '#ef4444', isSystem: true },
-  { name: 'Callback', colour: '#6366f1', isSystem: true },
-  { name: 'DND', colour: '#64748b', isSystem: true },
-  { name: 'Invalid Number', colour: '#dc2626', isSystem: true },
-];
 
 async function main() {
   console.log('🌱 Seeding database...');
@@ -29,13 +20,7 @@ async function main() {
   console.log('✅ Default branch seeded');
 
   // ── System Disposition Tags ──────────────────────────────────────
-  for (const tag of SYSTEM_TAGS) {
-    await prisma.dispositionTag.upsert({
-      where: { name: tag.name },
-      update: {},
-      create: tag,
-    });
-  }
+  await ensureSystemDispositionTags(prisma);
   console.log('✅ System tags seeded');
 
   // ── Admin User ───────────────────────────────────────────────────

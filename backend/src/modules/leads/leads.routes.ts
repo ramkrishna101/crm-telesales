@@ -95,7 +95,7 @@ router.get('/', async (req: Request, res: Response, next: NextFunction) => {
   try {
     const { role: callerRole, userId } = req.user!;
     const {
-      page = '1', limit = '50', campaignId, status, priority, assignedToId, q, callResult, followUpStatus, from, to,
+      page = '1', limit = '50', campaignId, status, priority, assignedToId, q, callResult, language, followUpStatus, from, to,
     } = req.query as Record<string, string>;
     const skip = (parseInt(page) - 1) * parseInt(limit);
 
@@ -134,6 +134,30 @@ router.get('/', async (req: Request, res: Response, next: NextFunction) => {
       ];
     }
 
+    const restrictLeadIds = (matchingIds: string[]) => {
+      const nextIds = new Set(matchingIds);
+      const currentIdFilter = where.id;
+
+      if (!nextIds.size) {
+        where.id = { in: ['__none__'] };
+        return;
+      }
+
+      if (
+        currentIdFilter &&
+        typeof currentIdFilter === 'object' &&
+        'in' in currentIdFilter &&
+        Array.isArray((currentIdFilter as { in: string[] }).in)
+      ) {
+        where.id = {
+          in: (currentIdFilter as { in: string[] }).in.filter((id) => nextIds.has(id)),
+        };
+        return;
+      }
+
+      where.id = { in: Array.from(nextIds) };
+    };
+
     // Filter by latest call result (disposition of the most recent CallLog per lead).
     // Uses DISTINCT ON to get the latest disposition per lead, then narrows the
     // leads query to those whose latest disposition matches.
@@ -146,8 +170,23 @@ router.get('/', async (req: Request, res: Response, next: NextFunction) => {
       const matchingIds = rows
         .filter((r) => r.dispositionTag === callResult)
         .map((r) => r.leadId);
-      // Combine with any existing id filter; empty list → no rows.
-      where.id = matchingIds.length ? { in: matchingIds } : { in: ['__none__'] };
+      restrictLeadIds(matchingIds);
+    }
+
+    if (language) {
+      const rows = await prisma.$queryRaw<{ leadId: string; notes: string | null }[]>`
+        SELECT DISTINCT ON ("leadId") "leadId", "notes"
+        FROM "call_logs"
+        ORDER BY "leadId", "calledAt" DESC
+      `;
+      const normalizedLanguage = language.trim().toLowerCase();
+      const matchingIds = rows
+        .filter((row) => {
+          const match = row.notes?.match(/^Language:\s*([^|]+?)(?:\s*\|\s*(.*))?$/i);
+          return match?.[1]?.trim().toLowerCase() === normalizedLanguage;
+        })
+        .map((row) => row.leadId);
+      restrictLeadIds(matchingIds);
     }
 
     // Filter by follow-up status (has at least one follow-up with that status).

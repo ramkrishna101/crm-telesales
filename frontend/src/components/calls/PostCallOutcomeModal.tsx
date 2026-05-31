@@ -7,7 +7,7 @@ import { stringeeService } from '../../services/stringee.service';
 import { tagsService, callsService, followUpsService, leadsService } from '../../services/crm.service';
 
 const STATUS_LABELS: Record<string, { label: string; bg: string; fg: string }> = {
-  uncontacted:    { label: 'Uncontacted',    bg: '#eef2f7', fg: '#475569' },
+  uncontacted:    { label: 'New Lead',       bg: '#eef2f7', fg: '#475569' },
   contacted:      { label: 'Contacted',      bg: '#e0f2fe', fg: '#0369a1' },
   lead:           { label: 'Interested',     bg: '#dcfce7', fg: '#15803d' },
   callback:       { label: 'Callback',       bg: '#fef9c3', fg: '#a16207' },
@@ -51,6 +51,41 @@ function formatShort(iso: string) {
   const hr12 = d.getHours() % 12 || 12;
   const ampm = d.getHours() >= 12 ? 'PM' : 'AM';
   return `${pad(d.getDate())}-${pad(d.getMonth() + 1)}-${d.getFullYear()} ${pad(hr12)}:${pad(d.getMinutes())} ${ampm}`;
+}
+
+function formatDateInputValue(date: Date) {
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`;
+}
+
+function formatTimeInputValue(date: Date) {
+  return `${pad(date.getHours())}:${pad(date.getMinutes())}`;
+}
+
+function resolveReminderSchedule(date: string, time: string) {
+  if (!date && !time) return null;
+  if (!date) throw new Error('Select a reminder date');
+  if (!time) throw new Error('Select a reminder time');
+
+  const scheduledAt = new Date(`${date}T${time}:00`);
+  if (Number.isNaN(scheduledAt.getTime())) {
+    throw new Error('Enter a valid reminder date and time');
+  }
+  if (scheduledAt <= new Date()) {
+    throw new Error('Reminder must be scheduled in the future');
+  }
+
+  return scheduledAt.toISOString();
+}
+
+function getApiErrorMessage(error: unknown, fallback: string) {
+  if (error && typeof error === 'object') {
+    const response = (error as { response?: { data?: { message?: string; error?: { message?: string } } } }).response;
+    const message = response?.data?.message || response?.data?.error?.message;
+    if (message) return message;
+  }
+
+  if (error instanceof Error && error.message) return error.message;
+  return fallback;
 }
 
 export default function PostCallOutcomeModal() {
@@ -118,11 +153,16 @@ export default function PostCallOutcomeModal() {
   const effectiveDuration = cdr?.durationSeconds || state.lastCall?.durationSeconds || 0;
   const minutes = Math.floor(effectiveDuration / 60);
   const seconds = effectiveDuration % 60;
+  const earliestReminder = new Date(Date.now() + 60 * 1000);
+  const minReminderDate = formatDateInputValue(earliestReminder);
+  const minReminderTime = formatTimeInputValue(earliestReminder);
 
   const logMutation = useMutation({
     mutationFn: async () => {
       if (!state.lastCall) return;
       if (!dispositionTag) throw new Error('Call Result is required');
+
+      const scheduledAt = resolveReminderSchedule(followupDate, followupTime);
 
       const notesParts: string[] = [];
       if (language) notesParts.push(`Language: ${language}`);
@@ -137,25 +177,37 @@ export default function PostCallOutcomeModal() {
         followupStatus: followupStatus || undefined,
       });
 
-      // Schedule a follow-up if a date was picked
-      if (followupDate) {
-        const time = followupTime || '10:00';
-        const scheduledAt = new Date(`${followupDate}T${time}:00`).toISOString();
+      let reminderError: string | null = null;
+
+      if (scheduledAt) {
         try {
           await followUpsService.create({
             leadId: state.lastCall.leadId,
             scheduledAt,
             notes: description || undefined,
           });
-        } catch {
-          // Non-fatal
+        } catch (error) {
+          reminderError = getApiErrorMessage(error, 'Call logged, but reminder could not be created');
         }
       }
+
+      return {
+        reminderScheduled: !!scheduledAt && !reminderError,
+        reminderError,
+      };
     },
-    onSuccess: () => {
+    onSuccess: (result) => {
       toast.success('Call logged');
+      if (result?.reminderScheduled) {
+        toast.success('Reminder scheduled');
+      }
+      if (result?.reminderError) {
+        toast.error(result.reminderError);
+      }
       qc.invalidateQueries({ queryKey: ['agent-leads'] });
       qc.invalidateQueries({ queryKey: ['agent-interested-leads'] });
+      qc.invalidateQueries({ queryKey: ['agent-follow-ups'] });
+      qc.invalidateQueries({ queryKey: ['agent-dashboard'] });
       qc.invalidateQueries({ queryKey: ['lead-history'] });
       qc.invalidateQueries({ queryKey: ['lead-details'] });
       stringeeService.dismissOutcome();
@@ -238,6 +290,7 @@ export default function PostCallOutcomeModal() {
             type="date"
             value={followupDate}
             onChange={(e) => setFollowupDate(e.target.value)}
+            min={minReminderDate}
             className={isMobile ? 'agent-mobile-outcome-sheet__input' : undefined}
             style={{ ...inputStyle, flex: 1 }}
           />
@@ -245,6 +298,7 @@ export default function PostCallOutcomeModal() {
             type="time"
             value={followupTime}
             onChange={(e) => setFollowupTime(e.target.value)}
+            min={followupDate === minReminderDate ? minReminderTime : undefined}
             className={isMobile ? 'agent-mobile-outcome-sheet__input' : undefined}
             style={{ ...inputStyle, width: isMobile ? '100%' : 110 }}
           />

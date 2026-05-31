@@ -19,6 +19,24 @@ const formatCampaignDate = (value: string) => new Intl.DateTimeFormat('en-US', {
   year: 'numeric',
 }).format(new Date(value));
 
+function downloadSampleCsv() {
+  const csv = [
+    'name,phone,email,city',
+    'Aarav Sharma,9876543210,aarav@example.com,Mumbai',
+    'Priya Verma,9123456780,priya@example.com,Delhi',
+  ].join('\n');
+
+  const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = 'sample-leads.csv';
+  document.body.appendChild(link);
+  link.click();
+  document.body.removeChild(link);
+  URL.revokeObjectURL(url);
+}
+
 interface Campaign {
   id: string; name: string; description?: string;
   type: 'standard' | 'vip'; priority: 'normal' | 'high';
@@ -372,6 +390,14 @@ function CampaignWizard({ teams, agents, onClose, onCreate }: {
               <div style={{ textAlign: 'center' }}>
                 <h3 style={{ fontSize: '1.1rem', fontWeight: 700, marginBottom: 8 }}>Final Step: Import Leads</h3>
                 <p style={{ fontSize: '0.85rem', color: 'var(--text-muted)' }}>Upload your CSV or Excel file to populate the campaign immediately.</p>
+                <button
+                  type="button"
+                  className="btn btn-secondary"
+                  onClick={downloadSampleCsv}
+                  style={{ marginTop: 12, padding: '8px 12px', fontSize: '0.8rem' }}
+                >
+                  <Download size={14} /> Sample CSV
+                </button>
               </div>
 
               <div 
