@@ -4,10 +4,10 @@ import { leadsService, usersService, campaignsService, tagsService } from '../..
 import AppLayout from '../../components/layout/AppLayout';
 import ConfirmDialog from '../../components/ui/ConfirmDialog';
 import DateRangeFilter, { computeRange, type DateRangePreset, type DateRangeValue } from '../../components/ui/DateRangeFilter';
-import Dropdown from '../../components/ui/Dropdown';
+import MultiSelectDropdown from '../../components/ui/MultiSelectDropdown';
 import toast from 'react-hot-toast';
 import * as XLSX from 'xlsx';
-import { Upload, Search, RefreshCw, ChevronLeft, ChevronRight, Download, FileSpreadsheet, CheckCircle2, X, UserCheck, PhoneCall, Trash2, SlidersHorizontal } from 'lucide-react';
+import { Upload, Search, RefreshCw, ChevronLeft, ChevronRight, Download, FileSpreadsheet, CheckCircle2, X, UserCheck, Phone, PhoneCall, Trash2, SlidersHorizontal, Copy } from 'lucide-react';
 import { stringeeService } from '../../services/stringee.service';
 
 type OptionalColumnKey = 'followupStatus' | 'priority' | 'assignedTo' | 'lastCallResult' | 'language' | 'createdTime' | 'lastCalled';
@@ -50,6 +50,20 @@ function getDateRangeValue(from: string, to: string): DateRangeValue {
   }
 
   return { preset: 'custom', from: normalizedFrom, to: normalizedTo };
+}
+
+function maskPhone(phone?: string | null) {
+  if (!phone) return '—';
+  return phone.slice(0, -4).replace(/[0-9]/g, 'X') + phone.slice(-4);
+}
+
+function arraysEqual(left: string[], right: string[]) {
+  if (left.length !== right.length) return false;
+  return left.every((value, index) => value === right[index]);
+}
+
+function serializeFilterValues(values: string[]) {
+  return values.length > 0 ? values.join(',') : '';
 }
 
 // ── Export Leads to Excel ─────────────────────────────────────────────
@@ -341,17 +355,19 @@ export default function LeadsPage() {
   const qc = useQueryClient();
   const commonLanguages = ['Hindi', 'Kannada', 'Telugu', 'Tamil', 'English', 'Malayalam', 'Marathi', 'Bengali'];
   const columnMenuRef = useRef<HTMLDivElement>(null);
-  const [campaignFilter, setCampaignFilter] = useState('');
-  const [statusFilter, setStatusFilter] = useState('');
-  const [agentFilter, setAgentFilter] = useState('');
+  const [draftCampaignFilters, setDraftCampaignFilters] = useState<string[]>([]);
+  const [campaignFilters, setCampaignFilters] = useState<string[]>([]);
+  const [draftStatusFilters, setDraftStatusFilters] = useState<string[]>([]);
+  const [statusFilters, setStatusFilters] = useState<string[]>([]);
+  const [draftAgentFilters, setDraftAgentFilters] = useState<string[]>([]);
+  const [agentFilters, setAgentFilters] = useState<string[]>([]);
   // Draft + applied state for call result / lead status (Apply/Reset pattern)
-  const [draftCallResult, setDraftCallResult] = useState('');
-  const [draftFollowUp, setDraftFollowUp] = useState('');
-  const [draftLanguage, setDraftLanguage] = useState('');
+  const [draftCallResults, setDraftCallResults] = useState<string[]>([]);
+  const [draftLanguages, setDraftLanguages] = useState<string[]>([]);
   const [draftCreatedFrom, setDraftCreatedFrom] = useState('');
   const [draftCreatedTo, setDraftCreatedTo] = useState('');
-  const [callResultFilter, setCallResultFilter] = useState('');
-  const [languageFilter, setLanguageFilter] = useState('');
+  const [callResultFilters, setCallResultFilters] = useState<string[]>([]);
+  const [languageFilters, setLanguageFilters] = useState<string[]>([]);
   const [createdFromFilter, setCreatedFromFilter] = useState('');
   const [createdToFilter, setCreatedToFilter] = useState('');
   const [search, setSearch] = useState('');
@@ -393,50 +409,65 @@ export default function LeadsPage() {
     setDraftVisibleColumns(visibleColumns);
   }, [isColumnMenuOpen, visibleColumns]);
 
+  const serializedCampaignFilters = serializeFilterValues(campaignFilters);
+  const serializedAgentFilters = serializeFilterValues(agentFilters);
+  const serializedStatusFilters = serializeFilterValues(statusFilters);
+  const serializedCallResultFilters = serializeFilterValues(callResultFilters);
+  const serializedLanguageFilters = serializeFilterValues(languageFilters);
+
   const hasUnapplied =
-    draftCallResult !== callResultFilter ||
-    draftFollowUp !== statusFilter ||
-    draftLanguage !== languageFilter ||
+    !arraysEqual(draftCampaignFilters, campaignFilters) ||
+    !arraysEqual(draftAgentFilters, agentFilters) ||
+    !arraysEqual(draftStatusFilters, statusFilters) ||
+    !arraysEqual(draftCallResults, callResultFilters) ||
+    !arraysEqual(draftLanguages, languageFilters) ||
     draftCreatedFrom !== createdFromFilter ||
     draftCreatedTo !== createdToFilter;
   const hasActiveFilters = !!(
-    callResultFilter || statusFilter || draftCallResult || draftFollowUp || languageFilter || draftLanguage ||
+    campaignFilters.length || agentFilters.length || statusFilters.length || callResultFilters.length || languageFilters.length ||
+    draftCampaignFilters.length || draftAgentFilters.length || draftStatusFilters.length || draftCallResults.length || draftLanguages.length ||
     createdFromFilter || createdToFilter || draftCreatedFrom || draftCreatedTo
   );
   const draftCreatedRange = getDateRangeValue(draftCreatedFrom, draftCreatedTo);
 
   const applyFilters = () => {
-    setCallResultFilter(draftCallResult);
-    setStatusFilter(draftFollowUp);
-    setLanguageFilter(draftLanguage);
+    setCampaignFilters(draftCampaignFilters);
+    setAgentFilters(draftAgentFilters);
+    setStatusFilters(draftStatusFilters);
+    setCallResultFilters(draftCallResults);
+    setLanguageFilters(draftLanguages);
     setCreatedFromFilter(draftCreatedFrom);
     setCreatedToFilter(draftCreatedTo);
     setPage(1);
   };
   const resetFilters = () => {
-    setDraftCallResult('');
-    setDraftFollowUp('');
-    setDraftLanguage('');
+    setDraftCampaignFilters([]);
+    setDraftAgentFilters([]);
+    setDraftStatusFilters([]);
+    setDraftCallResults([]);
+    setDraftLanguages([]);
     setDraftCreatedFrom('');
     setDraftCreatedTo('');
-    setCallResultFilter('');
-    setStatusFilter('');
-    setLanguageFilter('');
+    setCampaignFilters([]);
+    setAgentFilters([]);
+    setStatusFilters([]);
+    setCallResultFilters([]);
+    setLanguageFilters([]);
     setCreatedFromFilter('');
     setCreatedToFilter('');
     setPage(1);
   };
 
   const { data: leadsData, isLoading } = useQuery({
-    queryKey: ['leads', page, campaignFilter, statusFilter, agentFilter, callResultFilter, languageFilter, createdFromFilter, createdToFilter],
+    queryKey: ['leads', page, serializedCampaignFilters, serializedStatusFilters, serializedAgentFilters, serializedCallResultFilters, serializedLanguageFilters, createdFromFilter, createdToFilter],
     queryFn: () => leadsService.list({ 
       page, 
       limit: LIMIT, 
-      ...(campaignFilter ? { campaignId: campaignFilter } : {}), 
-      ...(statusFilter ? { status: statusFilter } : {}),
-      ...(agentFilter ? { assignedToId: agentFilter } : {}),
-      ...(callResultFilter ? { callResult: callResultFilter } : {}),
-      ...(languageFilter ? { language: languageFilter } : {}),
+      ...(serializedCampaignFilters ? { campaignId: serializedCampaignFilters } : {}), 
+      ...(serializedStatusFilters ? { status: serializedStatusFilters } : {}),
+      ...(serializedAgentFilters ? { assignedToId: serializedAgentFilters } : {}),
+      ...(serializedCallResultFilters ? { callResult: serializedCallResultFilters } : {}),
+      ...(serializedLanguageFilters ? { language: serializedLanguageFilters } : {}),
       ...(createdFromFilter ? { from: createdFromFilter } : {}),
       ...(createdToFilter ? { to: createdToFilter } : {}),
     }),
@@ -491,10 +522,44 @@ export default function LeadsPage() {
     onError: () => toast.error('Assignment failed'),
   });
 
+  const copyPhone = async (leadId: string) => {
+    try {
+      const response = await leadsService.getPhone(leadId);
+      const phone = response.data?.data?.phone;
+      if (!phone) {
+        toast.error('Phone number unavailable');
+        return;
+      }
+
+      await navigator.clipboard.writeText(phone);
+      toast.success(`Copied: ${phone}`);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Clipboard not available';
+      toast.error(message);
+    }
+  };
+
+  const displayPhone = (phone?: string | null) => maskPhone(phone);
+
+  const copyPhoneLegacy = async (phone?: string | null) => {
+    if (!phone) {
+      toast.error('Phone number unavailable');
+      return;
+    }
+
+    try {
+      await navigator.clipboard.writeText(phone);
+      toast.success(`Copied: ${phone}`);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Clipboard not available';
+      toast.error(message);
+    }
+  };
+
   const leads: Lead[] = leadsData?.data?.data?.leads || [];
   const languageOptions = Array.from(
     new Map(
-      [...commonLanguages, ...leads.map((lead) => lead.lastCallLanguage || ''), languageFilter, draftLanguage]
+      [...commonLanguages, ...leads.map((lead) => lead.lastCallLanguage || ''), ...languageFilters, ...draftLanguages]
         .filter((value): value is string => Boolean(value && value.trim()))
         .map((value) => [value.toLowerCase(), value]),
     ).values(),
@@ -608,11 +673,11 @@ export default function LeadsPage() {
               className="btn btn-secondary"
               onClick={() => exportLeads(
                 {
-                  ...(campaignFilter ? { campaignId: campaignFilter } : {}),
-                  ...(statusFilter ? { status: statusFilter } : {}),
-                  ...(agentFilter ? { assignedToId: agentFilter } : {}),
-                  ...(callResultFilter ? { callResult: callResultFilter } : {}),
-                  ...(languageFilter ? { language: languageFilter } : {}),
+                  ...(serializedCampaignFilters ? { campaignId: serializedCampaignFilters } : {}),
+                  ...(serializedStatusFilters ? { status: serializedStatusFilters } : {}),
+                  ...(serializedAgentFilters ? { assignedToId: serializedAgentFilters } : {}),
+                  ...(serializedCallResultFilters ? { callResult: serializedCallResultFilters } : {}),
+                  ...(serializedLanguageFilters ? { language: serializedLanguageFilters } : {}),
                   ...(createdFromFilter ? { from: createdFromFilter } : {}),
                   ...(createdToFilter ? { to: createdToFilter } : {}),
                 },
@@ -638,7 +703,7 @@ export default function LeadsPage() {
         )}
 
           {/* Assign entire campaign in one click */}
-            {campaignFilter && (
+            {campaignFilters.length === 1 && (
               <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '8px 14px', background: 'var(--bg-elevated)', borderRadius: 10, border: '1px solid var(--border)', flexWrap: 'wrap' }}>
                 <UserCheck size={15} style={{ color: '#22d3ee', flexShrink: 0 }} />
                 <span style={{ fontSize: '0.82rem', color: 'var(--text-secondary)', whiteSpace: 'nowrap' }}>Assign all unassigned to:</span>
@@ -646,7 +711,7 @@ export default function LeadsPage() {
                   defaultValue=""
                   onChange={(e) => {
                     if (e.target.value) {
-                      assignCampaignMutation.mutate({ campaignId: campaignFilter, agentId: e.target.value });
+                      assignCampaignMutation.mutate({ campaignId: campaignFilters[0], agentId: e.target.value });
                       e.target.value = '';
                     }
                   }}>
@@ -666,24 +731,22 @@ export default function LeadsPage() {
           </div>
           <div className="form-group" style={{ width: 180 }}>
             <label className="form-label">Campaign</label>
-            <Dropdown
-              value={campaignFilter}
-              onChange={(value) => { setCampaignFilter(value); setPage(1); }}
+            <MultiSelectDropdown
+              values={draftCampaignFilters}
+              onChange={setDraftCampaignFilters}
               placeholder="All"
               options={[
-                { value: '', label: 'All' },
                 ...(campaigns as Record<string, string>[]).map((c) => ({ value: c.id, label: c.name })),
               ]}
             />
           </div>
           <div className="form-group" style={{ width: 180 }}>
             <label className="form-label">Agent</label>
-            <Dropdown
-              value={agentFilter}
-              onChange={(value) => { setAgentFilter(value); setPage(1); }}
+            <MultiSelectDropdown
+              values={draftAgentFilters}
+              onChange={setDraftAgentFilters}
               placeholder="All"
               options={[
-                { value: '', label: 'All' },
                 { value: 'null', label: 'Unassigned' },
                 ...(agents as Record<string, string>[]).map((a) => ({ value: a.id, label: a.name })),
               ]}
@@ -691,12 +754,11 @@ export default function LeadsPage() {
           </div>
           <div className="form-group" style={{ width: 180 }}>
             <label className="form-label">Followup Status</label>
-            <Dropdown
-              value={draftFollowUp}
-              onChange={setDraftFollowUp}
+            <MultiSelectDropdown
+              values={draftStatusFilters}
+              onChange={setDraftStatusFilters}
               placeholder="All"
               options={[
-                { value: '', label: 'All' },
                 { value: 'uncontacted',    label: 'New Lead',       colour: '#6f63ff' },
                 { value: 'contacted',      label: 'Contacted',      colour: '#3b82f6' },
                 { value: 'lead',           label: 'Interested',     colour: '#1f9d55' },
@@ -709,24 +771,22 @@ export default function LeadsPage() {
           </div>
           <div className="form-group" style={{ width: 180 }}>
             <label className="form-label">Call Result</label>
-            <Dropdown
-              value={draftCallResult}
-              onChange={setDraftCallResult}
+            <MultiSelectDropdown
+              values={draftCallResults}
+              onChange={setDraftCallResults}
               placeholder="All"
               options={[
-                { value: '', label: 'All' },
                 ...dispositionTags.map((t) => ({ value: t.name, label: t.name, colour: t.color || undefined })),
               ]}
             />
           </div>
           <div className="form-group" style={{ width: 160 }}>
             <label className="form-label">Language</label>
-            <Dropdown
-              value={draftLanguage}
-              onChange={setDraftLanguage}
+            <MultiSelectDropdown
+              values={draftLanguages}
+              onChange={setDraftLanguages}
               placeholder="All"
               options={[
-                { value: '', label: 'All' },
                 ...languageOptions.map((language) => ({ value: language, label: language })),
               ]}
             />
@@ -865,12 +925,31 @@ export default function LeadsPage() {
               <div style={{ width: 28 }}><input type="checkbox" checked={selected.includes(l.id)} onChange={() => toggleSelect(l.id)} /></div>
               <div className="table-cell" style={{ flex: 2 }}>
                 <div style={{ fontWeight: 500, color: 'var(--text-primary)' }}>{l.name || '—'}</div>
-                <div style={{ fontSize: '0.76rem', color: 'var(--text-muted)' }}>
-                  {l.isDnd && <span style={{ color: '#ef4444', marginRight: 4 }}>⛔ DND</span>}
-                  {l.email || ''}
-                </div>
-                <div style={{ fontSize: '0.74rem', color: 'var(--text-muted)', marginTop: 2 }}>
-                  Created: {new Date(l.createdAt).toLocaleString()}
+                <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: '0.76rem', color: 'var(--text-muted)', marginTop: 2, flexWrap: 'wrap' }}>
+                  {l.phone && (
+                    <>
+                      <Phone size={12} />
+                      <span>{displayPhone(l.phone)}</span>
+                      <button
+                        type="button"
+                        onClick={() => void copyPhone(l.id)}
+                        aria-label="Copy phone number"
+                        title="Copy phone number"
+                        style={{
+                          border: 'none',
+                          background: 'transparent',
+                          color: '#94a3b8',
+                          display: 'inline-flex',
+                          alignItems: 'center',
+                          justifyContent: 'center',
+                          padding: 0,
+                          cursor: 'pointer',
+                        }}
+                      >
+                        <Copy size={12} />
+                      </button>
+                    </>
+                  )}
                 </div>
               </div>
               {visibleColumns.followupStatus && (

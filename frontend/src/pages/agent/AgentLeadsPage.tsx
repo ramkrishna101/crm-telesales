@@ -6,6 +6,7 @@ import AppLayout from '../../components/layout/AppLayout';
 import { useIsMobile } from '../../hooks/useIsMobile';
 import DateRangeFilter, { computeRange, type DateRangePreset, type DateRangeValue } from '../../components/ui/DateRangeFilter';
 import Dropdown from '../../components/ui/Dropdown';
+import MultiSelectDropdown from '../../components/ui/MultiSelectDropdown';
 import { 
   Search, User, Phone, Calendar, MessageSquare, 
   ExternalLink, ChevronLeft, ChevronRight, Mail, Hash, Clock, History, PhoneCall, SlidersHorizontal, Languages, FileText, Copy, Check, X
@@ -65,6 +66,42 @@ function getCreatedDateRangeValue(from: string, to: string): DateRangeValue {
   }
 
   return { preset: 'custom', from: normalizedFrom, to: normalizedTo };
+}
+
+function maskPhone(phone?: string | null) {
+  if (!phone) return '—';
+  return phone.slice(0, -4).replace(/[0-9]/g, 'X') + phone.slice(-4);
+}
+
+function arraysEqual(left: string[], right: string[]) {
+  if (left.length !== right.length) return false;
+  return left.every((value, index) => value === right[index]);
+}
+
+function serializeFilterValues(values: string[]) {
+  return values.length > 0 ? values.join(',') : '';
+}
+
+async function copyText(value: string) {
+  if (navigator.clipboard?.writeText) {
+    await navigator.clipboard.writeText(value);
+    return;
+  }
+
+  const textArea = document.createElement('textarea');
+  textArea.value = value;
+  textArea.setAttribute('readonly', 'true');
+  textArea.style.position = 'fixed';
+  textArea.style.opacity = '0';
+  document.body.appendChild(textArea);
+  textArea.select();
+
+  const successful = document.execCommand('copy');
+  document.body.removeChild(textArea);
+
+  if (!successful) {
+    throw new Error('Clipboard not available');
+  }
 }
 
 function getAgentTableWidths(visibleOptionalColumnCount: number) {
@@ -155,18 +192,16 @@ export default function AgentLeadsPage() {
   const columnMenuRef = useRef<HTMLDivElement>(null);
   const [searchTerm, setSearchTerm] = useState('');
   const [debouncedSearch, setDebouncedSearch] = useState('');
-  const [draftStatus, setDraftStatus] = useState('');
-  const [draftPriority, setDraftPriority] = useState('');
-  const [draftCallResult, setDraftCallResult] = useState('');
-  const [draftCampaignId, setDraftCampaignId] = useState('');
-  const [draftCampaignLabel, setDraftCampaignLabel] = useState('');
+  const [draftStatus, setDraftStatus] = useState<string[]>([]);
+  const [draftPriority, setDraftPriority] = useState<string[]>([]);
+  const [draftCallResult, setDraftCallResult] = useState<string[]>([]);
+  const [draftCampaignId, setDraftCampaignId] = useState<string[]>([]);
   const [draftCreatedFrom, setDraftCreatedFrom] = useState('');
   const [draftCreatedTo, setDraftCreatedTo] = useState('');
-  const [statusFilter, setStatusFilter] = useState('');
-  const [priorityFilter, setPriorityFilter] = useState('');
-  const [callResultFilter, setCallResultFilter] = useState('');
-  const [campaignFilter, setCampaignFilter] = useState('');
-  const [campaignFilterLabel, setCampaignFilterLabel] = useState('');
+  const [statusFilter, setStatusFilter] = useState<string[]>([]);
+  const [priorityFilter, setPriorityFilter] = useState<string[]>([]);
+  const [callResultFilter, setCallResultFilter] = useState<string[]>([]);
+  const [campaignFilter, setCampaignFilter] = useState<string[]>([]);
   const [createdFromFilter, setCreatedFromFilter] = useState('');
   const [createdToFilter, setCreatedToFilter] = useState('');
   const [page, setPage] = useState(1);
@@ -207,25 +242,25 @@ export default function AgentLeadsPage() {
     setDraftVisibleColumns(visibleColumns);
   }, [isColumnMenuOpen, visibleColumns]);
 
+  const serializedStatusFilter = serializeFilterValues(statusFilter);
+  const serializedPriorityFilter = serializeFilterValues(priorityFilter);
+  const serializedCallResultFilter = serializeFilterValues(callResultFilter);
+  const serializedCampaignFilter = serializeFilterValues(campaignFilter);
+
   const hasUnapplied =
-    draftStatus !== statusFilter ||
-    draftPriority !== priorityFilter ||
-    draftCallResult !== callResultFilter ||
-    draftCampaignId !== campaignFilter ||
+    !arraysEqual(draftStatus, statusFilter) ||
+    !arraysEqual(draftPriority, priorityFilter) ||
+    !arraysEqual(draftCallResult, callResultFilter) ||
+    !arraysEqual(draftCampaignId, campaignFilter) ||
     draftCreatedFrom !== createdFromFilter ||
     draftCreatedTo !== createdToFilter;
 
   const hasActiveFilters =
     !!(
-      statusFilter || priorityFilter || callResultFilter || campaignFilter || createdFromFilter || createdToFilter ||
-      draftStatus || draftPriority || draftCallResult || draftCampaignId || draftCreatedFrom || draftCreatedTo
+      statusFilter.length || priorityFilter.length || callResultFilter.length || campaignFilter.length || createdFromFilter || createdToFilter ||
+      draftStatus.length || draftPriority.length || draftCallResult.length || draftCampaignId.length || draftCreatedFrom || draftCreatedTo
     );
   const draftCreatedRange = getCreatedDateRangeValue(draftCreatedFrom, draftCreatedTo);
-
-  const updateDraftCampaign = (value: string, label?: string) => {
-    setDraftCampaignId(value);
-    setDraftCampaignLabel(value ? (label || draftCampaignLabel || campaignFilterLabel || 'Selected campaign') : '');
-  };
 
   const copyPhone = async (leadId: string) => {
     try {
@@ -236,7 +271,7 @@ export default function AgentLeadsPage() {
         return;
       }
 
-      await navigator.clipboard.writeText(phone);
+      await copyText(phone);
       toast.success(`Copied: ${phone}`);
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Clipboard not available';
@@ -249,24 +284,21 @@ export default function AgentLeadsPage() {
     setPriorityFilter(draftPriority);
     setCallResultFilter(draftCallResult);
     setCampaignFilter(draftCampaignId);
-    setCampaignFilterLabel(draftCampaignId ? (draftCampaignLabel || campaignFilterLabel || 'Selected campaign') : '');
     setCreatedFromFilter(draftCreatedFrom);
     setCreatedToFilter(draftCreatedTo);
   };
 
   const resetFilters = () => {
-    setDraftStatus('');
-    setDraftPriority('');
-    setDraftCallResult('');
-    setDraftCampaignId('');
-    setDraftCampaignLabel('');
+    setDraftStatus([]);
+    setDraftPriority([]);
+    setDraftCallResult([]);
+    setDraftCampaignId([]);
     setDraftCreatedFrom('');
     setDraftCreatedTo('');
-    setStatusFilter('');
-    setPriorityFilter('');
-    setCallResultFilter('');
-    setCampaignFilter('');
-    setCampaignFilterLabel('');
+    setStatusFilter([]);
+    setPriorityFilter([]);
+    setCallResultFilter([]);
+    setCampaignFilter([]);
     setCreatedFromFilter('');
     setCreatedToFilter('');
   };
@@ -280,18 +312,18 @@ export default function AgentLeadsPage() {
   // Reset to page 1 whenever filters/search change.
   useEffect(() => {
     setPage(1);
-  }, [debouncedSearch, statusFilter, priorityFilter, callResultFilter, campaignFilter, createdFromFilter, createdToFilter]);
+  }, [debouncedSearch, serializedStatusFilter, serializedPriorityFilter, serializedCallResultFilter, serializedCampaignFilter, createdFromFilter, createdToFilter]);
 
   const { data, isLoading, isFetching } = useQuery({
-    queryKey: ['agent-leads', statusFilter, priorityFilter, callResultFilter, campaignFilter, createdFromFilter, createdToFilter, debouncedSearch, page],
+    queryKey: ['agent-leads', serializedStatusFilter, serializedPriorityFilter, serializedCallResultFilter, serializedCampaignFilter, createdFromFilter, createdToFilter, debouncedSearch, page],
     queryFn: () =>
       leadsService.list({
         page,
         limit: PAGE_SIZE,
-        ...(statusFilter ? { status: statusFilter } : {}),
-        ...(priorityFilter ? { priority: priorityFilter } : {}),
-        ...(callResultFilter ? { callResult: callResultFilter } : {}),
-        ...(campaignFilter ? { campaignId: campaignFilter } : {}),
+        ...(serializedStatusFilter ? { status: serializedStatusFilter } : {}),
+        ...(serializedPriorityFilter ? { priority: serializedPriorityFilter } : {}),
+        ...(serializedCallResultFilter ? { callResult: serializedCallResultFilter } : {}),
+        ...(serializedCampaignFilter ? { campaignId: serializedCampaignFilter } : {}),
         ...(createdFromFilter ? { from: createdFromFilter } : {}),
         ...(createdToFilter ? { to: createdToFilter } : {}),
         ...(debouncedSearch ? { q: debouncedSearch } : {}),
@@ -341,21 +373,16 @@ export default function AgentLeadsPage() {
     }
   });
 
-  const campaignOptions = [
-    { value: '', label: 'All' },
-    ...Array.from(campaignOptionMap.entries())
-      .sort((left, right) => left[1].localeCompare(right[1]))
-      .map(([value, label]) => ({ value, label })),
-  ];
+  const selectedCampaignIds = new Set([...campaignFilter, ...draftCampaignId]);
+  const campaignOptions = Array.from(campaignOptionMap.entries())
+    .sort((left, right) => left[1].localeCompare(right[1]))
+    .map(([value, label]) => ({ value, label }));
 
-  if (campaignFilter && !campaignOptionMap.has(campaignFilter)) {
-    campaignOptions.push({ value: campaignFilter, label: campaignFilterLabel || 'Selected campaign' });
-  }
-
-  const handleCampaignChange = (value: string) => {
-    const option = campaignOptions.find((entry) => entry.value === value);
-    updateDraftCampaign(value, option?.label);
-  };
+  selectedCampaignIds.forEach((value) => {
+    if (!campaignOptionMap.has(value)) {
+      campaignOptions.push({ value, label: 'Selected campaign' });
+    }
+  });
 
   useEffect(() => {
     if (!isMobile) return;
@@ -562,9 +589,9 @@ export default function AgentLeadsPage() {
                 <div className="agent-mobile-sheet__body">
                   <div className="agent-mobile-sheet__field">
                     <div className="agent-mobile-sheet__label">Campaign</div>
-                    <Dropdown
-                      value={draftCampaignId}
-                      onChange={handleCampaignChange}
+                    <MultiSelectDropdown
+                      values={draftCampaignId}
+                      onChange={setDraftCampaignId}
                       placeholder="All campaigns"
                       options={campaignOptions}
                       height={42}
@@ -572,26 +599,25 @@ export default function AgentLeadsPage() {
                   </div>
                   <div className="agent-mobile-sheet__field">
                     <div className="agent-mobile-sheet__label">Follow-up status</div>
-                    <Dropdown
-                      value={draftStatus}
+                    <MultiSelectDropdown
+                      values={draftStatus}
                       onChange={setDraftStatus}
                       placeholder="All followup statuses"
-                      options={FOLLOW_UP_STATUS_OPTIONS.map((option) => ({
+                      options={FOLLOW_UP_STATUS_OPTIONS.filter((option) => option.value).map((option) => ({
                         value: option.value,
                         label: option.label,
-                        colour: option.value ? STATUS_COLORS[option.value]?.dot : undefined,
+                        colour: STATUS_COLORS[option.value]?.dot,
                       }))}
                       height={42}
                     />
                   </div>
                   <div className="agent-mobile-sheet__field">
                     <div className="agent-mobile-sheet__label">Call result</div>
-                    <Dropdown
-                      value={draftCallResult}
+                    <MultiSelectDropdown
+                      values={draftCallResult}
                       onChange={setDraftCallResult}
                       placeholder="All call results"
                       options={[
-                        { value: '', label: 'All call results' },
                         ...dispositionTags.map((tag) => {
                           const key = tag.name.toLowerCase();
                           return {
@@ -606,11 +632,11 @@ export default function AgentLeadsPage() {
                   </div>
                   <div className="agent-mobile-sheet__field">
                     <div className="agent-mobile-sheet__label">Priority</div>
-                    <Dropdown
-                      value={draftPriority}
+                    <MultiSelectDropdown
+                      values={draftPriority}
                       onChange={setDraftPriority}
                       placeholder="All priorities"
-                      options={PRIORITY_OPTIONS}
+                      options={PRIORITY_OPTIONS.filter((option) => option.value)}
                       height={42}
                     />
                   </div>
@@ -709,34 +735,33 @@ export default function AgentLeadsPage() {
             </div>
             <div className="form-group" style={{ width: 170 }}>
               <label className="form-label">Campaign</label>
-              <Dropdown
-                value={draftCampaignId}
-                onChange={handleCampaignChange}
+              <MultiSelectDropdown
+                values={draftCampaignId}
+                onChange={setDraftCampaignId}
                 placeholder="All"
                 options={campaignOptions}
               />
             </div>
             <div className="form-group" style={{ width: 170 }}>
               <label className="form-label">Followup Status</label>
-              <Dropdown
-                value={draftStatus}
+              <MultiSelectDropdown
+                values={draftStatus}
                 onChange={setDraftStatus}
                 placeholder="All"
-                options={FOLLOW_UP_STATUS_OPTIONS.map((o) => ({
+                options={FOLLOW_UP_STATUS_OPTIONS.filter((o) => o.value).map((o) => ({
                   value: o.value,
                   label: o.label,
-                  colour: o.value ? STATUS_COLORS[o.value]?.dot : undefined,
+                  colour: STATUS_COLORS[o.value]?.dot,
                 }))}
               />
             </div>
             <div className="form-group" style={{ width: 170 }}>
               <label className="form-label">Call Result</label>
-              <Dropdown
-                value={draftCallResult}
+              <MultiSelectDropdown
+                values={draftCallResult}
                 onChange={setDraftCallResult}
                 placeholder="All"
                 options={[
-                  { value: '', label: 'All' },
                   ...dispositionTags.map((t) => {
                     const key = t.name.toLowerCase();
                     return {
@@ -750,11 +775,11 @@ export default function AgentLeadsPage() {
             </div>
             <div className="form-group" style={{ width: 150 }}>
               <label className="form-label">Priority</label>
-              <Dropdown
-                value={draftPriority}
+              <MultiSelectDropdown
+                values={draftPriority}
                 onChange={setDraftPriority}
                 placeholder="All"
-                options={PRIORITY_OPTIONS}
+                options={PRIORITY_OPTIONS.filter((option) => option.value)}
               />
             </div>
             <div className="form-group" style={{ minWidth: 180 }}>
@@ -954,7 +979,7 @@ export default function AgentLeadsPage() {
                               </div>
                               <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: '0.75rem', color: 'var(--text-secondary)', marginTop: 2, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
                                 <Phone size={11} style={{ flexShrink: 0 }} />
-                                <span>{lead.phone}</span>
+                                <span>{maskPhone(lead.phone)}</span>
                                 <button
                                   type="button"
                                   onClick={() => void copyPhone(lead.id)}
@@ -1163,7 +1188,7 @@ function LeadDetailsModal({ leadId, onClose }: { leadId: string, onClose: () => 
         return;
       }
 
-      await navigator.clipboard.writeText(phone);
+      await copyText(phone);
       toast.success(`Copied: ${phone}`);
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Clipboard not available';

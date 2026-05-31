@@ -12,6 +12,18 @@ import { ADMIN_ROLES, assertBranchAccess, getUserBranchId, isSuperAdmin } from '
 const router = Router();
 router.use(authenticate);
 
+function splitFilterValues(value?: string) {
+  return (value || '')
+    .split(',')
+    .map((entry) => entry.trim())
+    .filter(Boolean);
+}
+
+function pushAndCondition(where: Record<string, unknown>, condition: Record<string, unknown>) {
+  const currentAnd = Array.isArray(where.AND) ? where.AND as Record<string, unknown>[] : [];
+  where.AND = [...currentAnd, condition];
+}
+
 // ── Multer Config ─────────────────────────────────────────────────────
 
 const UPLOAD_DIR = process.env.UPLOAD_DIR || './uploads';
@@ -98,6 +110,12 @@ router.get('/', async (req: Request, res: Response, next: NextFunction) => {
       page = '1', limit = '50', campaignId, status, priority, assignedToId, q, callResult, language, followUpStatus, from, to,
     } = req.query as Record<string, string>;
     const skip = (parseInt(page) - 1) * parseInt(limit);
+    const campaignIds = splitFilterValues(campaignId);
+    const statuses = splitFilterValues(status);
+    const priorities = splitFilterValues(priority);
+    const assignedToIds = splitFilterValues(assignedToId);
+    const callResults = splitFilterValues(callResult);
+    const languages = splitFilterValues(language);
 
     let where: Record<string, unknown> = { deletedAt: null };
 
@@ -110,11 +128,30 @@ router.get('/', async (req: Request, res: Response, next: NextFunction) => {
       where.branchId = getUserBranchId(req.user!);
     }
 
-    if (campaignId) where.campaignId = campaignId;
-    if (status) where.status = status;
-    if (priority) where.priority = priority;
-    if (assignedToId && callerRole !== 'agent') {
-      where.assignedToId = assignedToId === 'null' ? null : assignedToId;
+    if (campaignIds.length === 1) where.campaignId = campaignIds[0];
+    if (campaignIds.length > 1) where.campaignId = { in: campaignIds };
+    if (statuses.length === 1) where.status = statuses[0];
+    if (statuses.length > 1) where.status = { in: statuses };
+    if (priorities.length === 1) where.priority = priorities[0];
+    if (priorities.length > 1) where.priority = { in: priorities };
+    if (assignedToIds.length > 0 && callerRole !== 'agent') {
+      const nonNullAssignedToIds = assignedToIds.filter((value) => value !== 'null');
+      const includesUnassigned = assignedToIds.includes('null');
+
+      if (includesUnassigned && nonNullAssignedToIds.length > 0) {
+        pushAndCondition(where, {
+          OR: [
+            { assignedToId: null },
+            { assignedToId: { in: nonNullAssignedToIds } },
+          ],
+        });
+      } else if (includesUnassigned) {
+        where.assignedToId = null;
+      } else if (nonNullAssignedToIds.length === 1) {
+        where.assignedToId = nonNullAssignedToIds[0];
+      } else if (nonNullAssignedToIds.length > 1) {
+        where.assignedToId = { in: nonNullAssignedToIds };
+      }
     }
 
     // Date range filter on createdAt (IST). Used by the admin dashboard.
@@ -161,29 +198,30 @@ router.get('/', async (req: Request, res: Response, next: NextFunction) => {
     // Filter by latest call result (disposition of the most recent CallLog per lead).
     // Uses DISTINCT ON to get the latest disposition per lead, then narrows the
     // leads query to those whose latest disposition matches.
-    if (callResult) {
+    if (callResults.length > 0) {
+      const callResultSet = new Set(callResults);
       const rows = await prisma.$queryRaw<{ leadId: string; dispositionTag: string }[]>`
         SELECT DISTINCT ON ("leadId") "leadId", "dispositionTag"
         FROM "call_logs"
         ORDER BY "leadId", "calledAt" DESC
       `;
       const matchingIds = rows
-        .filter((r) => r.dispositionTag === callResult)
+        .filter((r) => callResultSet.has(r.dispositionTag))
         .map((r) => r.leadId);
       restrictLeadIds(matchingIds);
     }
 
-    if (language) {
+    if (languages.length > 0) {
       const rows = await prisma.$queryRaw<{ leadId: string; notes: string | null }[]>`
         SELECT DISTINCT ON ("leadId") "leadId", "notes"
         FROM "call_logs"
         ORDER BY "leadId", "calledAt" DESC
       `;
-      const normalizedLanguage = language.trim().toLowerCase();
+      const normalizedLanguages = new Set(languages.map((entry) => entry.trim().toLowerCase()));
       const matchingIds = rows
         .filter((row) => {
           const match = row.notes?.match(/^Language:\s*([^|]+?)(?:\s*\|\s*(.*))?$/i);
-          return match?.[1]?.trim().toLowerCase() === normalizedLanguage;
+          return normalizedLanguages.has(match?.[1]?.trim().toLowerCase() || '');
         })
         .map((row) => row.leadId);
       restrictLeadIds(matchingIds);
@@ -199,7 +237,7 @@ router.get('/', async (req: Request, res: Response, next: NextFunction) => {
         where,
         skip,
         take: parseInt(limit),
-        orderBy: [{ priority: 'desc' }, { createdAt: 'asc' }],
+        orderBy: { createdAt: 'desc' },
         select: {
           id: true,
           // Always select the raw phone here; agent responses are masked below.
@@ -225,7 +263,6 @@ router.get('/', async (req: Request, res: Response, next: NextFunction) => {
       prisma.lead.count({ where }),
     ]);
 
-    // Apply phone masking for agents
     const formattedLeads = leads.map((l) => {
       const { callLogs, ...rest } = l as typeof l & { callLogs?: Array<{ dispositionTag: string; calledAt: Date; notes: string | null }> };
       const lastCallNotes = callLogs?.[0]?.notes || null;
@@ -243,9 +280,7 @@ router.get('/', async (req: Request, res: Response, next: NextFunction) => {
       }
       return {
         ...rest,
-        phone: callerRole === 'agent'
-          ? `****${(l as { phone?: string }).phone?.slice(-4) || '****'}`
-          : (l as { phone?: string }).phone,
+        phone: (l as { phone?: string }).phone,
         lastCallResult: callLogs?.[0]?.dispositionTag || null,
         lastCallLanguage,
         lastCallDescription,
@@ -380,10 +415,9 @@ router.get('/:id', async (req: Request, res: Response, next: NextFunction) => {
       throw new AppError(403, 'FORBIDDEN', 'This lead is not assigned to you');
     }
 
-    // Mask phone for agents
     const response = {
       ...lead,
-      phone: callerRole === 'agent' ? `****${lead.phone.slice(-4)}` : lead.phone,
+      phone: lead.phone,
     };
 
     res.json({ success: true, data: response });
