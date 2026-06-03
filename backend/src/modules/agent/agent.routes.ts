@@ -9,53 +9,62 @@ const router = Router();
 router.use(authenticate);
 
 // ── GET /api/agent/dashboard ──────────────────────────────────────────
-// Agent's workspace summary: stats + today's follow-ups + pending leads count
+// Agent's workspace summary scoped to the selected date range
 
 router.get('/dashboard', requireRole('agent'), async (req: Request, res: Response, next: NextFunction) => {
   try {
     const agentId = req.user!.userId;
-    const todayStart = new Date();
-    todayStart.setHours(0, 0, 0, 0);
-    const todayEnd = new Date();
-    todayEnd.setHours(23, 59, 59, 999);
+    const query = z.object({
+      from: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
+      to: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
+    }).parse(req.query);
+    const rangeStart = query.from ? parseDateAtStartOfDay(query.from) : startOfDay(new Date());
+    const rangeEnd = query.to ? parseDateAtEndOfDay(query.to) : endOfDay(new Date());
+    const leadRange = { gte: rangeStart, lte: rangeEnd };
 
     const [
       totalLeads,
       pendingLeads,
-      callsToday,
-      followUpsToday,
+      callsInRange,
+      talkTimeInRange,
+      followUpsInRange,
       activeBreak,
-      breakTimeToday,
+      breakTimeInRange,
       recentCalls,
       tagStats,
     ] = await Promise.all([
-      prisma.lead.count({ where: { assignedToId: agentId } }),
-      prisma.lead.count({ where: { assignedToId: agentId, status: { in: ['uncontacted', 'callback'] } } }),
-      prisma.callLog.count({ where: { agentId, calledAt: { gte: todayStart } } }),
+      prisma.lead.count({ where: { assignedToId: agentId, createdAt: leadRange } }),
+      prisma.lead.count({ where: { assignedToId: agentId, status: { in: ['uncontacted', 'callback'] }, createdAt: leadRange } }),
+      prisma.callLog.count({ where: { agentId, calledAt: { gte: rangeStart, lte: rangeEnd } } }),
+      prisma.callLog.aggregate({
+        where: { agentId, calledAt: { gte: rangeStart, lte: rangeEnd } },
+        _sum: { durationSeconds: true },
+      }),
       prisma.followUp.findMany({
-        where: { agentId, scheduledAt: { gte: todayStart, lte: todayEnd }, status: 'pending' },
+        where: { agentId, scheduledAt: { gte: rangeStart, lte: rangeEnd }, status: 'pending' },
         include: { lead: { select: { id: true, name: true, phone: true } } },
         orderBy: { scheduledAt: 'asc' },
       }),
       prisma.breakLog.findFirst({ where: { agentId, endedAt: null } }),
-      // Total break minutes today
+      // Total break minutes in the selected range.
       prisma.$queryRaw<Array<{ mins: number }>>`
         SELECT COALESCE(SUM(
           EXTRACT(EPOCH FROM (COALESCE("endedAt", NOW()) - "startedAt")) / 60
         ), 0) as mins
         FROM break_logs WHERE "agentId" = ${agentId}
-        AND "startedAt" >= ${todayStart}
+        AND "startedAt" >= ${rangeStart}
+        AND "startedAt" <= ${rangeEnd}
       `,
       prisma.callLog.findMany({
-        where: { agentId, calledAt: { gte: todayStart } },
+        where: { agentId, calledAt: { gte: rangeStart, lte: rangeEnd } },
         orderBy: { calledAt: 'desc' },
         take: 5,
         include: { lead: { select: { id: true, name: true, phone: true, status: true, priority: true } } },
       }),
-      // Calls by tag today
+      // Calls by tag in the selected range.
       prisma.callLog.groupBy({
         by: ['dispositionTag'],
-        where: { agentId, calledAt: { gte: todayStart } },
+        where: { agentId, calledAt: { gte: rangeStart, lte: rangeEnd } },
         _count: { dispositionTag: true },
       }),
     ]);
@@ -66,12 +75,13 @@ router.get('/dashboard', requireRole('agent'), async (req: Request, res: Respons
         stats: {
           totalLeads,
           pendingLeads,
-          callsToday,
-          breakMinutesToday: Math.round(Number((breakTimeToday[0] as { mins: number })?.mins || 0)),
+          callsToday: callsInRange,
+          talkTimeSeconds: talkTimeInRange._sum.durationSeconds || 0,
+          breakMinutesToday: Math.round(Number((breakTimeInRange[0] as { mins: number })?.mins || 0)),
           isOnBreak: !!activeBreak,
           breakStartedAt: activeBreak?.startedAt || null,
         },
-        followUpsToday: followUpsToday.map(f => ({ ...f, lead: maskPhone(f.lead) })),
+        followUpsToday: followUpsInRange.map(f => ({ ...f, lead: maskPhone(f.lead) })),
         recentCalls: recentCalls.map(c => ({ ...c, lead: maskPhone(c.lead) })),
         tagStats: tagStats.map((t) => ({ tag: t.dispositionTag, count: t._count.dispositionTag })),
       },
@@ -80,6 +90,30 @@ router.get('/dashboard', requireRole('agent'), async (req: Request, res: Respons
     next(err);
   }
 });
+
+function startOfDay(value: Date) {
+  const next = new Date(value);
+  next.setHours(0, 0, 0, 0);
+  return next;
+}
+
+function endOfDay(value: Date) {
+  const next = new Date(value);
+  next.setHours(23, 59, 59, 999);
+  return next;
+}
+
+function parseDateAtStartOfDay(value: string) {
+  const next = new Date(`${value}T00:00:00`);
+  next.setHours(0, 0, 0, 0);
+  return next;
+}
+
+function parseDateAtEndOfDay(value: string) {
+  const next = new Date(`${value}T00:00:00`);
+  next.setHours(23, 59, 59, 999);
+  return next;
+}
 
 // ── GET /api/agent/next-lead ──────────────────────────────────────────
 // Returns next lead from priority queue:

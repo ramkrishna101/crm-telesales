@@ -172,6 +172,7 @@ export default function PostCallOutcomeModal() {
         leadId: state.lastCall.leadId,
         dispositionTag,
         durationSeconds: effectiveDuration,
+        language: language || undefined,
         notes: notesParts.join(' | ') || undefined,
         telephonyRef: state.lastCall.telephonyRef || undefined,
         followupStatus: followupStatus || undefined,

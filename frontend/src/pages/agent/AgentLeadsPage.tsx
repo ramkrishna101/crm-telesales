@@ -52,6 +52,8 @@ const AGENT_DEFAULT_VISIBLE_COLUMNS: Record<AgentOptionalColumnKey, boolean> = {
 
 const PAGE_SIZE_OPTIONS = [10, 25, 50] as const;
 
+const COMMON_LANGUAGE_OPTIONS = ['Hindi', 'Kannada', 'Telugu', 'Tamil', 'English', 'Malayalam', 'Marathi', 'Bengali', 'Other'];
+
 const AGENT_LEADS_VISIBLE_COLUMNS_STORAGE_KEY = 'agent-leads-visible-columns';
 
 const AGENT_DATE_RANGE_PRESETS: DateRangePreset[] = ['today', 'yesterday', 'last_7_days', 'this_month'];
@@ -193,7 +195,6 @@ function getLeadCallResultLabel(lead: { status?: string | null; lastCalledAt?: s
 export default function AgentLeadsPage() {
   const isMobile = useIsMobile();
   const navigate = useNavigate();
-  const commonLanguages = ['Hindi', 'Kannada', 'Telugu', 'Tamil', 'English', 'Malayalam', 'Marathi', 'Bengali'];
   const columnMenuRef = useRef<HTMLDivElement>(null);
   const [searchTerm, setSearchTerm] = useState('');
   const [debouncedSearch, setDebouncedSearch] = useState('');
@@ -382,7 +383,7 @@ export default function AgentLeadsPage() {
   const leads: Lead[] = data?.data?.data?.leads || [];
   const languageOptions = Array.from(
     new Map(
-      [...commonLanguages, ...leads.map((lead) => lead.lastCallLanguage || ''), ...languageFilters, ...draftLanguages]
+      [...COMMON_LANGUAGE_OPTIONS, ...leads.map((lead) => lead.lastCallLanguage || ''), ...languageFilters, ...draftLanguages]
         .filter((value): value is string => Boolean(value && value.trim()))
         .map((value) => [value.toLowerCase(), value]),
     ).values(),
@@ -534,7 +535,7 @@ export default function AgentLeadsPage() {
                     <div>
                       <div className="agent-mobile-lead-name">{selectedLead.name || 'Unknown'}</div>
                       <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                        <div className="agent-mobile-lead-phone">{selectedLead.phone}</div>
+                        <div className="agent-mobile-lead-phone">{maskPhone(selectedLead.phone)}</div>
                         <button
                           type="button"
                           onClick={() => void copyPhone(selectedLead.id)}
@@ -618,19 +619,6 @@ export default function AgentLeadsPage() {
                   <button className="btn-icon" onClick={() => setPage((p) => Math.max(1, p - 1))} disabled={page <= 1}><ChevronLeft size={16} /></button>
                   <button className="btn-icon" onClick={() => setPage((p) => Math.min(totalPages, p + 1))} disabled={page >= totalPages}><ChevronRight size={16} /></button>
                 </div>
-              </div>
-              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, marginTop: 12 }}>
-                <span style={{ fontSize: '0.82rem', color: 'var(--text-secondary)' }}>Rows per page</span>
-                <select
-                  className="form-input"
-                  value={pageSize}
-                  onChange={(e) => handlePageSizeChange(Number(e.target.value))}
-                  style={{ width: 88, padding: '8px 10px', fontSize: '0.85rem' }}
-                >
-                  {PAGE_SIZE_OPTIONS.map((option) => (
-                    <option key={option} value={option}>{option}</option>
-                  ))}
-                </select>
               </div>
             </section>
           )}
@@ -1297,6 +1285,7 @@ function LeadDetailsModal({ leadId, onClose }: { leadId: string, onClose: () => 
   const [activeTab, setActiveTab] = useState<'history' | 'comments'>('comments');
   const [statusDraft, setStatusDraft] = useState('');
   const [callResultDraft, setCallResultDraft] = useState('');
+  const [languageDraft, setLanguageDraft] = useState('');
 
   const copyPhone = async (leadIdToCopy: string) => {
     try {
@@ -1362,14 +1351,33 @@ function LeadDetailsModal({ leadId, onClose }: { leadId: string, onClose: () => 
     onError: (error: any) => toast.error(error?.response?.data?.error?.message || 'Failed to update call result'),
   });
 
+  const updateLanguageMutation = useMutation({
+    mutationFn: (language: string) => leadsService.updateLanguage(leadId, language),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['lead-details', leadId] });
+      qc.invalidateQueries({ queryKey: ['agent-leads'] });
+      toast.success('Language updated');
+    },
+    onError: (error: any) => toast.error(error?.response?.data?.error?.message || 'Failed to update language'),
+  });
+
   const lead = leadData?.data?.data;
   const history = historyData?.data?.data?.logs || [];
   const comments = lead?.comments || [];
   const dispositionTags: { name: string; color?: string | null }[] = tagsData?.data?.data || tagsData?.data || [];
+  const currentLanguage = lead?.language || lead?.lastCallLanguage || '';
+  const availableLanguageOptions = Array.from(
+    new Map(
+      [...COMMON_LANGUAGE_OPTIONS, currentLanguage, languageDraft]
+        .filter((value): value is string => Boolean(value && value.trim()))
+        .map((value) => [value.toLowerCase(), value]),
+    ).values(),
+  ).sort((left, right) => left.localeCompare(right));
   const latestCallResult = history[0]?.dispositionTag || '';
   const showNewLeadState = isFreshLead({ status: lead?.status, lastCalledAt: lead?.lastCalledAt || null, lastCallResult: latestCallResult || null });
   const hasStatusChange = Boolean(statusDraft && statusDraft !== (lead?.status || ''));
   const hasCallResultChange = Boolean(callResultDraft && callResultDraft !== latestCallResult);
+  const hasLanguageChange = Boolean(languageDraft && languageDraft !== currentLanguage);
 
   useEffect(() => {
     setStatusDraft(lead?.status || '');
@@ -1379,10 +1387,46 @@ function LeadDetailsModal({ leadId, onClose }: { leadId: string, onClose: () => 
     setCallResultDraft(latestCallResult);
   }, [latestCallResult]);
 
+  useEffect(() => {
+    setLanguageDraft(currentLanguage);
+  }, [currentLanguage]);
+
   const overlayStyle: React.CSSProperties = {
     position: 'fixed', inset: 0, background: 'rgba(15,23,42,0.55)',
     display: 'flex', alignItems: 'center', justifyContent: 'center',
     padding: 20, zIndex: 1200,
+  };
+
+  const desktopControlSlotStyle: React.CSSProperties = {
+    width: 136,
+    minWidth: 136,
+  };
+
+  const desktopActionGroupStyle: React.CSSProperties = {
+    display: 'flex',
+    alignItems: 'center',
+    gap: 2,
+    width: 36,
+    minWidth: 36,
+  };
+
+  const desktopActionButtonStyle: React.CSSProperties = {
+    width: 17,
+    height: 17,
+    borderRadius: 4,
+    border: 'none',
+    display: 'inline-flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+  };
+
+  const desktopDetailGridStyle: React.CSSProperties = {
+    display: 'grid',
+    gridTemplateColumns: 'minmax(0, 88px) minmax(0, 1fr)',
+    columnGap: 24,
+    rowGap: 6,
+    width: '100%',
+    alignItems: 'center',
   };
 
   if (isLeadLoading || !lead) {
@@ -1407,7 +1451,7 @@ function LeadDetailsModal({ leadId, onClose }: { leadId: string, onClose: () => 
       <div
         onClick={(e) => e.stopPropagation()}
         style={{
-          background: '#fff', borderRadius: 14, width: 'min(960px, 100%)',
+          background: '#fff', borderRadius: 14, width: 'min(1040px, 100%)',
           maxHeight: '92vh', display: 'flex', flexDirection: 'column',
           overflow: 'hidden', boxShadow: '0 30px 80px rgba(0,0,0,0.25)',
           fontFamily: 'system-ui, -apple-system, sans-serif',
@@ -1441,7 +1485,7 @@ function LeadDetailsModal({ leadId, onClose }: { leadId: string, onClose: () => 
 
         {/* Body */}
         <div style={{
-          display: 'grid', gridTemplateColumns: '300px 1fr',
+          display: 'grid', gridTemplateColumns: '340px 1fr',
           flex: 1, overflow: 'hidden',
         }}>
           {/* Left: Profile */}
@@ -1474,7 +1518,7 @@ function LeadDetailsModal({ leadId, onClose }: { leadId: string, onClose: () => 
             </div>
 
             <div>
-              <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) max-content', columnGap: 28, rowGap: 6, width: '100%', alignItems: 'center' }}>
+              <div style={desktopDetailGridStyle}>
                 <div style={{
                   fontSize: 10, color: '#94a3b8', textTransform: 'uppercase',
                   fontWeight: 700, letterSpacing: '0.06em',
@@ -1489,7 +1533,7 @@ function LeadDetailsModal({ leadId, onClose }: { leadId: string, onClose: () => 
                   Follow-up Status
                 </div>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 8, minWidth: 0 }}>
-                  <div style={{ fontWeight: 500, fontSize: 13, color: '#0f172a' }}>{lead.phone}</div>
+                  <div style={{ fontWeight: 500, fontSize: 13, color: '#0f172a' }}>{maskPhone(lead.phone)}</div>
                   <button
                     type="button"
                     onClick={() => void copyPhone(lead.id)}
@@ -1501,7 +1545,7 @@ function LeadDetailsModal({ leadId, onClose }: { leadId: string, onClose: () => 
                   </button>
                 </div>
                 <div style={{ display: 'flex', alignItems: 'center', justifySelf: 'start', gap: 4 }}>
-                  <div style={{ width: 108, minWidth: 108 }}>
+                  <div style={desktopControlSlotStyle}>
                     <Dropdown
                       value={statusDraft}
                       onChange={setStatusDraft}
@@ -1510,7 +1554,7 @@ function LeadDetailsModal({ leadId, onClose }: { leadId: string, onClose: () => 
                       height={30}
                     />
                   </div>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 4, width: 52, minWidth: 52 }}>
+                  <div style={desktopActionGroupStyle}>
                     <button
                       type="button"
                       aria-label="Save follow-up status"
@@ -1519,9 +1563,9 @@ function LeadDetailsModal({ leadId, onClose }: { leadId: string, onClose: () => 
                       onClick={() => {
                         if (hasStatusChange) updateStatusMutation.mutate(statusDraft);
                       }}
-                      style={{ width: 24, height: 24, borderRadius: 6, border: 'none', background: '#dcfce7', color: '#15803d', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', cursor: hasStatusChange ? 'pointer' : 'default', opacity: hasStatusChange ? (updateStatusMutation.isPending ? 0.45 : 1) : 0, pointerEvents: hasStatusChange ? 'auto' : 'none' }}
+                      style={{ ...desktopActionButtonStyle, background: '#dcfce7', color: '#15803d', cursor: hasStatusChange ? 'pointer' : 'default', opacity: hasStatusChange ? (updateStatusMutation.isPending ? 0.45 : 1) : 0, pointerEvents: hasStatusChange ? 'auto' : 'none' }}
                     >
-                      <Check size={12} />
+                      <Check size={9} />
                     </button>
                     <button
                       type="button"
@@ -1531,9 +1575,9 @@ function LeadDetailsModal({ leadId, onClose }: { leadId: string, onClose: () => 
                       onClick={() => {
                         if (hasStatusChange) setStatusDraft(lead.status || '');
                       }}
-                      style={{ width: 24, height: 24, borderRadius: 6, border: 'none', background: '#f1f5f9', color: '#64748b', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', cursor: hasStatusChange ? 'pointer' : 'default', opacity: hasStatusChange ? 1 : 0, pointerEvents: hasStatusChange ? 'auto' : 'none' }}
+                      style={{ ...desktopActionButtonStyle, background: '#f1f5f9', color: '#64748b', cursor: hasStatusChange ? 'pointer' : 'default', opacity: hasStatusChange ? 1 : 0, pointerEvents: hasStatusChange ? 'auto' : 'none' }}
                     >
-                      <X size={12} />
+                      <X size={9} />
                     </button>
                   </div>
                 </div>
@@ -1541,7 +1585,7 @@ function LeadDetailsModal({ leadId, onClose }: { leadId: string, onClose: () => 
             </div>
 
             <div>
-              <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) max-content', columnGap: 28, rowGap: 6, width: '100%', alignItems: 'center' }}>
+              <div style={desktopDetailGridStyle}>
                 <div style={{
                   fontSize: 10, color: '#94a3b8', textTransform: 'uppercase',
                   fontWeight: 700, letterSpacing: '0.06em',
@@ -1557,7 +1601,7 @@ function LeadDetailsModal({ leadId, onClose }: { leadId: string, onClose: () => 
                 </div>
                 <div style={{ fontWeight: 500, fontSize: 13, color: '#0f172a', minWidth: 0 }}>{lead.email || 'Not provided'}</div>
                 <div style={{ display: 'flex', alignItems: 'center', justifySelf: 'start', gap: 4 }}>
-                  <div style={{ width: 108, minWidth: 108 }}>
+                  <div style={desktopControlSlotStyle}>
                     <Dropdown
                       value={callResultDraft}
                       onChange={setCallResultDraft}
@@ -1566,7 +1610,7 @@ function LeadDetailsModal({ leadId, onClose }: { leadId: string, onClose: () => 
                       height={30}
                     />
                   </div>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 4, width: 52, minWidth: 52 }}>
+                  <div style={desktopActionGroupStyle}>
                     <button
                       type="button"
                       aria-label="Save call result"
@@ -1575,9 +1619,9 @@ function LeadDetailsModal({ leadId, onClose }: { leadId: string, onClose: () => 
                       onClick={() => {
                         if (hasCallResultChange) updateCallResultMutation.mutate(callResultDraft);
                       }}
-                      style={{ width: 24, height: 24, borderRadius: 6, border: 'none', background: '#dcfce7', color: '#15803d', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', cursor: hasCallResultChange ? 'pointer' : 'default', opacity: hasCallResultChange ? (updateCallResultMutation.isPending ? 0.45 : 1) : 0, pointerEvents: hasCallResultChange ? 'auto' : 'none' }}
+                      style={{ ...desktopActionButtonStyle, background: '#dcfce7', color: '#15803d', cursor: hasCallResultChange ? 'pointer' : 'default', opacity: hasCallResultChange ? (updateCallResultMutation.isPending ? 0.45 : 1) : 0, pointerEvents: hasCallResultChange ? 'auto' : 'none' }}
                     >
-                      <Check size={12} />
+                      <Check size={9} />
                     </button>
                     <button
                       type="button"
@@ -1587,32 +1631,86 @@ function LeadDetailsModal({ leadId, onClose }: { leadId: string, onClose: () => 
                       onClick={() => {
                         if (hasCallResultChange) setCallResultDraft(latestCallResult);
                       }}
-                      style={{ width: 24, height: 24, borderRadius: 6, border: 'none', background: '#f1f5f9', color: '#64748b', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', cursor: hasCallResultChange ? 'pointer' : 'default', opacity: hasCallResultChange ? 1 : 0, pointerEvents: hasCallResultChange ? 'auto' : 'none' }}
+                      style={{ ...desktopActionButtonStyle, background: '#f1f5f9', color: '#64748b', cursor: hasCallResultChange ? 'pointer' : 'default', opacity: hasCallResultChange ? 1 : 0, pointerEvents: hasCallResultChange ? 'auto' : 'none' }}
                     >
-                      <X size={12} />
+                      <X size={9} />
                     </button>
                   </div>
                 </div>
               </div>
             </div>
 
-            {[
-              { icon: <Hash size={13} />, label: 'Campaign', value: lead.campaign?.name || 'N/A' },
-              { icon: <Calendar size={13} />, label: 'Registered', value: new Date(lead.createdAt).toLocaleDateString() },
-            ].map((item, i) => (
-              <div key={i}>
+            <div>
+              <div style={desktopDetailGridStyle}>
                 <div style={{
                   fontSize: 10, color: '#94a3b8', textTransform: 'uppercase',
                   fontWeight: 700, letterSpacing: '0.06em',
-                  display: 'flex', alignItems: 'center', gap: 6, marginBottom: 5,
+                  display: 'flex', alignItems: 'center', gap: 6,
                 }}>
-                  {item.icon} {item.label}
+                  <Hash size={13} /> Campaign
+                </div>
+                <div style={{
+                  fontSize: 10, color: '#94a3b8', textTransform: 'uppercase',
+                  fontWeight: 700, letterSpacing: '0.06em', justifySelf: 'start',
+                  display: 'flex', alignItems: 'center', gap: 6,
+                }}>
+                  <Languages size={13} /> Language
                 </div>
                 <div style={{ fontWeight: 500, fontSize: 13, color: '#0f172a' }}>
-                  {item.value}
+                  {lead.campaign?.name || 'N/A'}
+                </div>
+                <div style={{ display: 'flex', alignItems: 'center', justifySelf: 'start', gap: 4 }}>
+                  <div style={desktopControlSlotStyle}>
+                    <Dropdown
+                      value={languageDraft}
+                      onChange={setLanguageDraft}
+                      options={availableLanguageOptions.map((language) => ({ value: language, label: language }))}
+                      placeholder="Select language"
+                      height={30}
+                    />
+                  </div>
+                  <div style={desktopActionGroupStyle}>
+                    <button
+                      type="button"
+                      aria-label="Save language"
+                      title="Save language"
+                      disabled={!hasLanguageChange || updateLanguageMutation.isPending}
+                      onClick={() => {
+                        if (hasLanguageChange) updateLanguageMutation.mutate(languageDraft);
+                      }}
+                      style={{ ...desktopActionButtonStyle, background: '#dcfce7', color: '#15803d', cursor: hasLanguageChange ? 'pointer' : 'default', opacity: hasLanguageChange ? (updateLanguageMutation.isPending ? 0.45 : 1) : 0, pointerEvents: hasLanguageChange ? 'auto' : 'none' }}
+                    >
+                      <Check size={9} />
+                    </button>
+                    <button
+                      type="button"
+                      aria-label="Reset language"
+                      title="Reset language"
+                      disabled={!hasLanguageChange}
+                      onClick={() => {
+                        if (hasLanguageChange) setLanguageDraft(currentLanguage);
+                      }}
+                      style={{ ...desktopActionButtonStyle, background: '#f1f5f9', color: '#64748b', cursor: hasLanguageChange ? 'pointer' : 'default', opacity: hasLanguageChange ? 1 : 0, pointerEvents: hasLanguageChange ? 'auto' : 'none' }}
+                    >
+                      <X size={9} />
+                    </button>
+                  </div>
                 </div>
               </div>
-            ))}
+            </div>
+
+            <div>
+              <div style={{
+                fontSize: 10, color: '#94a3b8', textTransform: 'uppercase',
+                fontWeight: 700, letterSpacing: '0.06em',
+                display: 'flex', alignItems: 'center', gap: 6, marginBottom: 5,
+              }}>
+                <Calendar size={13} /> Registered
+              </div>
+              <div style={{ fontWeight: 500, fontSize: 13, color: '#0f172a' }}>
+                {new Date(lead.createdAt).toLocaleDateString()}
+              </div>
+            </div>
           </div>
 
           {/* Right: Tabs */}

@@ -208,6 +208,7 @@ model Lead {
   phone        String     // Stored plain; masking happens at API layer
   email        String?
   name         String?
+  language     String?
   customFields Json?      // Extra CSV columns stored as JSONB
   assignedTo   User?      @relation("LeadAssignee", fields: [assignedToId], references: [id])
   assignedToId String?    // NULL = unassigned pool

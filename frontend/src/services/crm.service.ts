@@ -102,6 +102,8 @@ export const leadsService = {
     api.put(`/leads/${id}/status`, { status }),
   updateCallResult: (id: string, dispositionTag: string) =>
     api.put(`/leads/${id}/call-result`, { dispositionTag }),
+  updateLanguage: (id: string, language: string) =>
+    api.put(`/leads/${id}/language`, { language }),
   addComment: (id: string, content: string) => api.post(`/leads/${id}/comments`, { content }),
 };
 
@@ -135,7 +137,7 @@ export const followUpsService = {
 
 // ── Agent Workspace ───────────────────────────────────────────────────
 export const agentService = {
-  dashboard: () => api.get('/agent/dashboard'),
+  dashboard: (params?: Record<string, string>) => api.get('/agent/dashboard', { params }),
   nextLead: (campaignId?: string) =>
     api.get('/agent/next-lead', { params: campaignId ? { campaignId } : {} }),
   breakStart: () => api.post('/users/me/break/start'),

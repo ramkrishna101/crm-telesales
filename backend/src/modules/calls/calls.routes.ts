@@ -22,6 +22,7 @@ const logCallSchema = z.object({
   leadId: z.string().uuid(),
   dispositionTag: z.string().min(1),
   durationSeconds: z.number().int().min(0).default(0),
+  language: z.string().trim().min(1).max(80).optional(),
   notes: z.string().max(2000).optional(),
   telephonyRef: z.string().optional(),
   // Optional lifecycle stage. When omitted, the lead's current status is preserved
@@ -36,6 +37,8 @@ router.post('/', async (req: Request, res: Response, next: NextFunction) => {
   try {
     const body = logCallSchema.parse(req.body);
     const agentId = req.user!.userId;
+    const parsedLanguageMatch = body.notes?.match(/^Language:\s*([^|]+?)(?:\s*\|\s*(.*))?$/i);
+    const resolvedLanguage = body.language || parsedLanguageMatch?.[1]?.trim() || undefined;
 
     // Verify the lead is assigned to this agent (or admin/supervisor can log too)
     const lead = await prisma.lead.findUnique({ where: { id: body.leadId } });
@@ -87,6 +90,7 @@ router.post('/', async (req: Request, res: Response, next: NextFunction) => {
         data: {
           status: nextStatus as never,
           lastCalledAt: new Date(),
+          ...(resolvedLanguage ? { language: resolvedLanguage } : {}),
           ...(nextStatus === 'dnd' && { isDnd: true }),
         },
       }),

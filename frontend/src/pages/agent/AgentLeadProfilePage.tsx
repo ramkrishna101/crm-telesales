@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { ArrowLeft, Calendar, Check, Copy, Hash, History, Mail, MessageSquare, Phone, X } from 'lucide-react';
+import { ArrowLeft, Calendar, Check, Copy, Hash, History, Languages, Mail, MessageSquare, Phone, X } from 'lucide-react';
 import toast from 'react-hot-toast';
 import AppLayout from '../../components/layout/AppLayout';
 import Dropdown from '../../components/ui/Dropdown';
@@ -39,6 +39,13 @@ const FOLLOWUP_STATUS_OPTIONS = [
   { value: 'invalid', label: 'Invalid' },
 ] as const;
 
+const COMMON_LANGUAGE_OPTIONS = ['Hindi', 'Kannada', 'Telugu', 'Tamil', 'English', 'Malayalam', 'Marathi', 'Bengali', 'Other'];
+
+function maskPhone(phone?: string | null) {
+  if (!phone) return '—';
+  return phone.slice(0, -4).replace(/[0-9]/g, 'X') + phone.slice(-4);
+}
+
 function isFreshLead(lead?: { status?: string | null; lastCalledAt?: string | Date | null }, latestCallResult?: string | null) {
   return (lead?.status || 'uncontacted') === 'uncontacted' && !lead?.lastCalledAt && !latestCallResult;
 }
@@ -51,6 +58,7 @@ export default function AgentLeadProfilePage() {
   const [newComment, setNewComment] = useState('');
   const [statusDraft, setStatusDraft] = useState('');
   const [callResultDraft, setCallResultDraft] = useState('');
+  const [languageDraft, setLanguageDraft] = useState('');
 
   const copyPhone = async () => {
     try {
@@ -118,14 +126,33 @@ export default function AgentLeadProfilePage() {
     onError: (error: any) => toast.error(error?.response?.data?.error?.message || 'Failed to update call result'),
   });
 
+  const updateLanguageMutation = useMutation({
+    mutationFn: (language: string) => leadsService.updateLanguage(leadId, language),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['lead-details', leadId] });
+      qc.invalidateQueries({ queryKey: ['agent-leads'] });
+      toast.success('Language updated');
+    },
+    onError: (error: any) => toast.error(error?.response?.data?.error?.message || 'Failed to update language'),
+  });
+
   const lead = leadData?.data?.data;
   const history = historyData?.data?.data?.logs || [];
   const comments = lead?.comments || [];
   const dispositionTags: { name: string; color?: string | null }[] = tagsData?.data?.data || tagsData?.data || [];
+  const currentLanguage = lead?.language || lead?.lastCallLanguage || '';
+  const availableLanguageOptions = Array.from(
+    new Map(
+      [...COMMON_LANGUAGE_OPTIONS, currentLanguage, languageDraft]
+        .filter((value): value is string => Boolean(value && value.trim()))
+        .map((value) => [value.toLowerCase(), value]),
+    ).values(),
+  ).sort((left, right) => left.localeCompare(right));
   const latestCallResult = history[0]?.dispositionTag || '';
   const showNewLeadState = isFreshLead(lead, latestCallResult);
   const hasStatusChange = Boolean(statusDraft && statusDraft !== (lead?.status || ''));
   const hasCallResultChange = Boolean(callResultDraft && callResultDraft !== latestCallResult);
+  const hasLanguageChange = Boolean(languageDraft && languageDraft !== currentLanguage);
 
   useEffect(() => {
     setStatusDraft(lead?.status || '');
@@ -135,6 +162,10 @@ export default function AgentLeadProfilePage() {
     setCallResultDraft(latestCallResult);
   }, [latestCallResult]);
 
+  useEffect(() => {
+    setLanguageDraft(currentLanguage);
+  }, [currentLanguage]);
+
   const statusTheme = useMemo(() => {
     const statusKey = (lead?.status || 'uncontacted') as keyof typeof STATUS_COLORS;
     return STATUS_COLORS[statusKey] || STATUS_COLORS.uncontacted;
@@ -143,6 +174,42 @@ export default function AgentLeadProfilePage() {
   const statusLabel = showNewLeadState
     ? 'New Lead'
     : (STATUS_LABELS[lead?.status || 'uncontacted'] || (lead?.status || 'uncontacted').replace('_', ' '));
+
+  const mobilePairGridStyle = {
+    display: 'grid',
+    gridTemplateColumns: 'minmax(0, 0.85fr) minmax(0, 1.15fr)',
+    columnGap: 14,
+    rowGap: 8,
+    width: '100%',
+    alignItems: 'start',
+  } as const;
+
+  const mobileControlRowStyle = {
+    display: 'flex',
+    gap: 4,
+    alignItems: 'center',
+    width: '100%',
+    minWidth: 0,
+  } as const;
+
+  const mobileActionGroupStyle = {
+    display: 'flex',
+    alignItems: 'center',
+    gap: 3,
+    width: 38,
+    minWidth: 38,
+    justifyContent: 'flex-end',
+  } as const;
+
+  const mobileActionButtonStyle = {
+    width: 17,
+    height: 17,
+    borderRadius: 4,
+    border: 'none',
+    display: 'inline-flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+  } as const;
 
   return (
     <AppLayout>
@@ -167,7 +234,7 @@ export default function AgentLeadProfilePage() {
                 <div className="agent-mobile-profile-hero__copy">
                   <h1 className="agent-mobile-section-title">{lead.name || 'Unknown'}</h1>
                   <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                    <div className="agent-mobile-lead-phone">{lead.phone}</div>
+                    <div className="agent-mobile-lead-phone">{maskPhone(lead.phone)}</div>
                     <button
                       type="button"
                       onClick={() => void copyPhone()}
@@ -200,11 +267,11 @@ export default function AgentLeadProfilePage() {
               <section className="card card--mobile">
                 <div className="agent-mobile-detail-list">
                   <div className="agent-mobile-detail-item">
-                    <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) max-content', columnGap: 28, rowGap: 6, width: '100%', alignItems: 'center' }}>
+                    <div style={mobilePairGridStyle}>
                       <div className="agent-mobile-detail-label"><Phone size={14} /> Phone</div>
-                      <div className="agent-mobile-detail-label" style={{ justifySelf: 'start' }}>Follow-up Status</div>
+                      <div className="agent-mobile-detail-label">Follow-up Status</div>
                       <div style={{ display: 'flex', alignItems: 'center', gap: 8, minWidth: 0 }}>
-                        <div className="agent-mobile-detail-value">{lead.phone}</div>
+                        <div className="agent-mobile-detail-value">{maskPhone(lead.phone)}</div>
                         <button
                           type="button"
                           onClick={() => void copyPhone()}
@@ -215,8 +282,8 @@ export default function AgentLeadProfilePage() {
                           <Copy size={14} />
                         </button>
                       </div>
-                      <div style={{ display: 'flex', gap: 4, alignItems: 'center', justifySelf: 'start' }}>
-                        <div style={{ width: 108, minWidth: 108 }}>
+                      <div style={mobileControlRowStyle}>
+                        <div style={{ flex: 1, minWidth: 0 }}>
                           <Dropdown
                             value={statusDraft}
                             onChange={setStatusDraft}
@@ -225,7 +292,7 @@ export default function AgentLeadProfilePage() {
                             height={30}
                           />
                         </div>
-                        <div style={{ display: 'flex', alignItems: 'center', gap: 4, width: 52, minWidth: 52 }}>
+                        <div style={mobileActionGroupStyle}>
                           <button
                             type="button"
                             aria-label="Save follow-up status"
@@ -234,9 +301,9 @@ export default function AgentLeadProfilePage() {
                             onClick={() => {
                               if (hasStatusChange) updateStatusMutation.mutate(statusDraft);
                             }}
-                            style={{ width: 24, height: 24, borderRadius: 6, border: 'none', background: '#dcfce7', color: '#15803d', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', cursor: hasStatusChange ? 'pointer' : 'default', opacity: hasStatusChange ? (updateStatusMutation.isPending ? 0.45 : 1) : 0, pointerEvents: hasStatusChange ? 'auto' : 'none' }}
+                            style={{ ...mobileActionButtonStyle, background: '#dcfce7', color: '#15803d', cursor: hasStatusChange ? 'pointer' : 'default', opacity: hasStatusChange ? (updateStatusMutation.isPending ? 0.45 : 1) : 0, pointerEvents: hasStatusChange ? 'auto' : 'none' }}
                           >
-                            <Check size={12} />
+                            <Check size={10} />
                           </button>
                           <button
                             type="button"
@@ -246,21 +313,21 @@ export default function AgentLeadProfilePage() {
                             onClick={() => {
                               if (hasStatusChange) setStatusDraft(lead.status || '');
                             }}
-                            style={{ width: 24, height: 24, borderRadius: 6, border: 'none', background: '#f1f5f9', color: '#64748b', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', cursor: hasStatusChange ? 'pointer' : 'default', opacity: hasStatusChange ? 1 : 0, pointerEvents: hasStatusChange ? 'auto' : 'none' }}
+                            style={{ ...mobileActionButtonStyle, background: '#f1f5f9', color: '#64748b', cursor: hasStatusChange ? 'pointer' : 'default', opacity: hasStatusChange ? 1 : 0, pointerEvents: hasStatusChange ? 'auto' : 'none' }}
                           >
-                            <X size={12} />
+                            <X size={10} />
                           </button>
                         </div>
                       </div>
                     </div>
                   </div>
                   <div className="agent-mobile-detail-item">
-                    <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) max-content', columnGap: 28, rowGap: 6, width: '100%', alignItems: 'center' }}>
+                    <div style={mobilePairGridStyle}>
                       <div className="agent-mobile-detail-label"><Mail size={14} /> Email</div>
-                      <div className="agent-mobile-detail-label" style={{ justifySelf: 'start' }}>Call Result</div>
+                      <div className="agent-mobile-detail-label">Call Result</div>
                       <div className="agent-mobile-detail-value">{lead.email || 'Not provided'}</div>
-                      <div style={{ display: 'flex', gap: 4, alignItems: 'center', justifySelf: 'start' }}>
-                        <div style={{ width: 108, minWidth: 108 }}>
+                      <div style={mobileControlRowStyle}>
+                        <div style={{ flex: 1, minWidth: 0 }}>
                           <Dropdown
                             value={callResultDraft}
                             onChange={setCallResultDraft}
@@ -269,7 +336,7 @@ export default function AgentLeadProfilePage() {
                             height={30}
                           />
                         </div>
-                        <div style={{ display: 'flex', alignItems: 'center', gap: 4, width: 52, minWidth: 52 }}>
+                        <div style={mobileActionGroupStyle}>
                           <button
                             type="button"
                             aria-label="Save call result"
@@ -278,9 +345,9 @@ export default function AgentLeadProfilePage() {
                             onClick={() => {
                               if (hasCallResultChange) updateCallResultMutation.mutate(callResultDraft);
                             }}
-                            style={{ width: 24, height: 24, borderRadius: 6, border: 'none', background: '#dcfce7', color: '#15803d', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', cursor: hasCallResultChange ? 'pointer' : 'default', opacity: hasCallResultChange ? (updateCallResultMutation.isPending ? 0.45 : 1) : 0, pointerEvents: hasCallResultChange ? 'auto' : 'none' }}
+                            style={{ ...mobileActionButtonStyle, background: '#dcfce7', color: '#15803d', cursor: hasCallResultChange ? 'pointer' : 'default', opacity: hasCallResultChange ? (updateCallResultMutation.isPending ? 0.45 : 1) : 0, pointerEvents: hasCallResultChange ? 'auto' : 'none' }}
                           >
-                            <Check size={12} />
+                            <Check size={10} />
                           </button>
                           <button
                             type="button"
@@ -290,17 +357,57 @@ export default function AgentLeadProfilePage() {
                             onClick={() => {
                               if (hasCallResultChange) setCallResultDraft(latestCallResult);
                             }}
-                            style={{ width: 24, height: 24, borderRadius: 6, border: 'none', background: '#f1f5f9', color: '#64748b', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', cursor: hasCallResultChange ? 'pointer' : 'default', opacity: hasCallResultChange ? 1 : 0, pointerEvents: hasCallResultChange ? 'auto' : 'none' }}
+                            style={{ ...mobileActionButtonStyle, background: '#f1f5f9', color: '#64748b', cursor: hasCallResultChange ? 'pointer' : 'default', opacity: hasCallResultChange ? 1 : 0, pointerEvents: hasCallResultChange ? 'auto' : 'none' }}
                           >
-                            <X size={12} />
+                            <X size={10} />
                           </button>
                         </div>
                       </div>
                     </div>
                   </div>
                   <div className="agent-mobile-detail-item">
-                    <div className="agent-mobile-detail-label"><Hash size={14} /> Campaign</div>
-                    <div className="agent-mobile-detail-value">{lead.campaign?.name || 'N/A'}</div>
+                    <div style={mobilePairGridStyle}>
+                      <div className="agent-mobile-detail-label"><Hash size={14} /> Campaign</div>
+                      <div className="agent-mobile-detail-label"><Languages size={14} /> Language</div>
+                      <div className="agent-mobile-detail-value">{lead.campaign?.name || 'N/A'}</div>
+                      <div style={mobileControlRowStyle}>
+                        <div style={{ flex: 1, minWidth: 0 }}>
+                          <Dropdown
+                            value={languageDraft}
+                            onChange={setLanguageDraft}
+                            options={availableLanguageOptions.map((language) => ({ value: language, label: language }))}
+                            placeholder="Select language"
+                            height={30}
+                          />
+                        </div>
+                        <div style={mobileActionGroupStyle}>
+                          <button
+                            type="button"
+                            aria-label="Save language"
+                            title="Save language"
+                            disabled={!hasLanguageChange || updateLanguageMutation.isPending}
+                            onClick={() => {
+                              if (hasLanguageChange) updateLanguageMutation.mutate(languageDraft);
+                            }}
+                            style={{ ...mobileActionButtonStyle, background: '#dcfce7', color: '#15803d', cursor: hasLanguageChange ? 'pointer' : 'default', opacity: hasLanguageChange ? (updateLanguageMutation.isPending ? 0.45 : 1) : 0, pointerEvents: hasLanguageChange ? 'auto' : 'none' }}
+                          >
+                            <Check size={10} />
+                          </button>
+                          <button
+                            type="button"
+                            aria-label="Reset language"
+                            title="Reset language"
+                            disabled={!hasLanguageChange}
+                            onClick={() => {
+                              if (hasLanguageChange) setLanguageDraft(currentLanguage);
+                            }}
+                            style={{ ...mobileActionButtonStyle, background: '#f1f5f9', color: '#64748b', cursor: hasLanguageChange ? 'pointer' : 'default', opacity: hasLanguageChange ? 1 : 0, pointerEvents: hasLanguageChange ? 'auto' : 'none' }}
+                          >
+                            <X size={10} />
+                          </button>
+                        </div>
+                      </div>
+                    </div>
                   </div>
                   <div className="agent-mobile-detail-item">
                     <div className="agent-mobile-detail-label"><Calendar size={14} /> Registered</div>

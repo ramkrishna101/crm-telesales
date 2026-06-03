@@ -24,6 +24,20 @@ function pushAndCondition(where: Record<string, unknown>, condition: Record<stri
   where.AND = [...currentAnd, condition];
 }
 
+function extractLanguageMetadata(notes?: string | null): { language: string | null; description: string | null } {
+  if (!notes) return { language: null, description: null };
+
+  const match = notes.match(/^Language:\s*([^|]+?)(?:\s*\|\s*(.*))?$/i);
+  if (!match) {
+    return { language: null, description: notes };
+  }
+
+  return {
+    language: match[1].trim() || null,
+    description: (match[2] || '').trim() || null,
+  };
+}
+
 // ── Multer Config ─────────────────────────────────────────────────────
 
 const UPLOAD_DIR = process.env.UPLOAD_DIR || './uploads';
@@ -212,19 +226,36 @@ router.get('/', async (req: Request, res: Response, next: NextFunction) => {
     }
 
     if (languages.length > 0) {
+      const normalizedLanguages = new Set(languages.map((entry) => entry.trim().toLowerCase()));
+      const matchingLeadIds = new Set<string>();
+
+      const leadsWithLanguage = await prisma.lead.findMany({
+        where: { deletedAt: null, language: { not: null } },
+        select: { id: true, language: true },
+      });
+
+      leadsWithLanguage.forEach((lead) => {
+        const normalizedLanguage = lead.language?.trim().toLowerCase();
+        if (normalizedLanguage && normalizedLanguages.has(normalizedLanguage)) {
+          matchingLeadIds.add(lead.id);
+        }
+      });
+
       const rows = await prisma.$queryRaw<{ leadId: string; notes: string | null }[]>`
         SELECT DISTINCT ON ("leadId") "leadId", "notes"
         FROM "call_logs"
         ORDER BY "leadId", "calledAt" DESC
       `;
-      const normalizedLanguages = new Set(languages.map((entry) => entry.trim().toLowerCase()));
-      const matchingIds = rows
-        .filter((row) => {
-          const match = row.notes?.match(/^Language:\s*([^|]+?)(?:\s*\|\s*(.*))?$/i);
-          return normalizedLanguages.has(match?.[1]?.trim().toLowerCase() || '');
-        })
-        .map((row) => row.leadId);
-      restrictLeadIds(matchingIds);
+
+      rows.forEach((row) => {
+        const metadata = extractLanguageMetadata(row.notes);
+        const normalizedLanguage = metadata.language?.trim().toLowerCase();
+        if (normalizedLanguage && normalizedLanguages.has(normalizedLanguage)) {
+          matchingLeadIds.add(row.leadId);
+        }
+      });
+
+      restrictLeadIds(Array.from(matchingLeadIds));
     }
 
     // Filter by follow-up status (has at least one follow-up with that status).
@@ -244,6 +275,7 @@ router.get('/', async (req: Request, res: Response, next: NextFunction) => {
           phone: true,
           email: true,
           name: true,
+          language: true,
           status: true,
           priority: true,
           isDnd: true,
@@ -265,25 +297,13 @@ router.get('/', async (req: Request, res: Response, next: NextFunction) => {
 
     const formattedLeads = leads.map((l) => {
       const { callLogs, ...rest } = l as typeof l & { callLogs?: Array<{ dispositionTag: string; calledAt: Date; notes: string | null }> };
-      const lastCallNotes = callLogs?.[0]?.notes || null;
-      // Notes are stored as "Language: <lang> | <description>". Extract both parts.
-      let lastCallLanguage: string | null = null;
-      let lastCallDescription: string | null = null;
-      if (lastCallNotes) {
-        const m = lastCallNotes.match(/^Language:\s*([^|]+?)(?:\s*\|\s*(.*))?$/i);
-        if (m) {
-          lastCallLanguage = m[1].trim();
-          lastCallDescription = (m[2] || '').trim() || null;
-        } else {
-          lastCallDescription = lastCallNotes;
-        }
-      }
+      const metadata = extractLanguageMetadata(callLogs?.[0]?.notes || null);
       return {
         ...rest,
         phone: (l as { phone?: string }).phone,
         lastCallResult: callLogs?.[0]?.dispositionTag || null,
-        lastCallLanguage,
-        lastCallDescription,
+        lastCallLanguage: rest.language || metadata.language,
+        lastCallDescription: metadata.description,
       };
     });
 
@@ -415,9 +435,13 @@ router.get('/:id', async (req: Request, res: Response, next: NextFunction) => {
       throw new AppError(403, 'FORBIDDEN', 'This lead is not assigned to you');
     }
 
+    const metadata = extractLanguageMetadata(lead.callLogs[0]?.notes || null);
     const response = {
       ...lead,
       phone: lead.phone,
+      language: lead.language || metadata.language,
+      lastCallLanguage: lead.language || metadata.language,
+      lastCallDescription: metadata.description,
     };
 
     res.json({ success: true, data: response });
@@ -596,6 +620,27 @@ router.put('/:id/call-result', async (req: Request, res: Response, next: NextFun
         include: { agent: { select: { id: true, name: true } } },
       });
 
+    res.json({ success: true, data: updated });
+  } catch (err) {
+    next(err);
+  }
+});
+
+router.put('/:id/language', async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const id = param(req, 'id');
+    const { language } = z.object({
+      language: z.string().trim().min(1).max(80),
+    }).parse(req.body);
+
+    const lead = await prisma.lead.findFirst({ where: { id, deletedAt: null } });
+    if (!lead) throw new AppError(404, 'LEAD_NOT_FOUND', 'Lead not found');
+
+    if (req.user!.role === 'agent' && lead.assignedToId !== req.user!.userId) {
+      throw new AppError(403, 'FORBIDDEN', 'This lead is not assigned to you');
+    }
+
+    const updated = await prisma.lead.update({ where: { id }, data: { language } });
     res.json({ success: true, data: updated });
   } catch (err) {
     next(err);

@@ -159,10 +159,10 @@ function AgentRow({ u }: { u: Record<string, unknown> }) {
 // ── Admin Dashboard ───────────────────────────────────────────────────
 
 export default function AdminDashboard() {
-  // Date range filter — defaults to last 7 days to match prior behaviour.
+  // Date range filter — defaults to today for the shared dashboard behaviour.
   const [dateRange, setDateRange] = useState<DateRangeValue>(() => {
-    const r = computeRange('last_7_days');
-    return { preset: 'last_7_days', from: r.from, to: r.to };
+    const r = computeRange('today');
+    return { preset: 'today', from: r.from, to: r.to };
   });
   const [campaignFilter, setCampaignFilter] = useState('');
   const dateParams = { from: dateRange.from, to: dateRange.to };
