@@ -30,12 +30,13 @@ interface Lead {
   campaign?: { name: string };
 }
 
-type AgentOptionalColumnKey = 'followupStatus' | 'callResult' | 'campaign' | 'createdTime' | 'lastCalled';
+type AgentOptionalColumnKey = 'followupStatus' | 'callResult' | 'campaign' | 'language' | 'createdTime' | 'lastCalled';
 
 const AGENT_OPTIONAL_COLUMNS: { key: AgentOptionalColumnKey; label: string }[] = [
   { key: 'followupStatus', label: 'Followup Status' },
   { key: 'callResult', label: 'Call Result' },
   { key: 'campaign', label: 'Campaign' },
+  { key: 'language', label: 'Language' },
   { key: 'createdTime', label: 'Created Time' },
   { key: 'lastCalled', label: 'Last Called' },
 ];
@@ -44,9 +45,12 @@ const AGENT_DEFAULT_VISIBLE_COLUMNS: Record<AgentOptionalColumnKey, boolean> = {
   followupStatus: true,
   callResult: true,
   campaign: true,
+  language: true,
   createdTime: true,
   lastCalled: true,
 };
+
+const PAGE_SIZE_OPTIONS = [10, 25, 50] as const;
 
 const AGENT_LEADS_VISIBLE_COLUMNS_STORAGE_KEY = 'agent-leads-visible-columns';
 
@@ -189,27 +193,32 @@ function getLeadCallResultLabel(lead: { status?: string | null; lastCalledAt?: s
 export default function AgentLeadsPage() {
   const isMobile = useIsMobile();
   const navigate = useNavigate();
+  const commonLanguages = ['Hindi', 'Kannada', 'Telugu', 'Tamil', 'English', 'Malayalam', 'Marathi', 'Bengali'];
   const columnMenuRef = useRef<HTMLDivElement>(null);
   const [searchTerm, setSearchTerm] = useState('');
   const [debouncedSearch, setDebouncedSearch] = useState('');
   const [draftStatus, setDraftStatus] = useState<string[]>([]);
   const [draftPriority, setDraftPriority] = useState<string[]>([]);
   const [draftCallResult, setDraftCallResult] = useState<string[]>([]);
+  const [draftLanguages, setDraftLanguages] = useState<string[]>([]);
   const [draftCampaignId, setDraftCampaignId] = useState<string[]>([]);
   const [draftCreatedFrom, setDraftCreatedFrom] = useState('');
   const [draftCreatedTo, setDraftCreatedTo] = useState('');
   const [statusFilter, setStatusFilter] = useState<string[]>([]);
   const [priorityFilter, setPriorityFilter] = useState<string[]>([]);
   const [callResultFilter, setCallResultFilter] = useState<string[]>([]);
+  const [languageFilters, setLanguageFilters] = useState<string[]>([]);
   const [campaignFilter, setCampaignFilter] = useState<string[]>([]);
   const [createdFromFilter, setCreatedFromFilter] = useState('');
   const [createdToFilter, setCreatedToFilter] = useState('');
   const [page, setPage] = useState(1);
-  const PAGE_SIZE = 20;
+  const [pageSize, setPageSize] = useState<number>(10);
   const [selectedLeadId, setSelectedLeadId] = useState<string | null>(null);
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [isFilterSheetOpen, setIsFilterSheetOpen] = useState(false);
   const [isColumnMenuOpen, setIsColumnMenuOpen] = useState(false);
+  const [isFilterOverlayPending, setIsFilterOverlayPending] = useState(false);
+  const [hasFilterFetchStarted, setHasFilterFetchStarted] = useState(false);
   const [visibleColumns, setVisibleColumns] = useState<Record<AgentOptionalColumnKey, boolean>>(() => {
     if (typeof window === 'undefined') return AGENT_DEFAULT_VISIBLE_COLUMNS;
 
@@ -245,20 +254,22 @@ export default function AgentLeadsPage() {
   const serializedStatusFilter = serializeFilterValues(statusFilter);
   const serializedPriorityFilter = serializeFilterValues(priorityFilter);
   const serializedCallResultFilter = serializeFilterValues(callResultFilter);
+  const serializedLanguageFilter = serializeFilterValues(languageFilters);
   const serializedCampaignFilter = serializeFilterValues(campaignFilter);
 
   const hasUnapplied =
     !arraysEqual(draftStatus, statusFilter) ||
     !arraysEqual(draftPriority, priorityFilter) ||
     !arraysEqual(draftCallResult, callResultFilter) ||
+    !arraysEqual(draftLanguages, languageFilters) ||
     !arraysEqual(draftCampaignId, campaignFilter) ||
     draftCreatedFrom !== createdFromFilter ||
     draftCreatedTo !== createdToFilter;
 
   const hasActiveFilters =
     !!(
-      statusFilter.length || priorityFilter.length || callResultFilter.length || campaignFilter.length || createdFromFilter || createdToFilter ||
-      draftStatus.length || draftPriority.length || draftCallResult.length || draftCampaignId.length || draftCreatedFrom || draftCreatedTo
+      statusFilter.length || priorityFilter.length || callResultFilter.length || languageFilters.length || campaignFilter.length || createdFromFilter || createdToFilter ||
+      draftStatus.length || draftPriority.length || draftCallResult.length || draftLanguages.length || draftCampaignId.length || draftCreatedFrom || draftCreatedTo
     );
   const draftCreatedRange = getCreatedDateRangeValue(draftCreatedFrom, draftCreatedTo);
 
@@ -280,27 +291,39 @@ export default function AgentLeadsPage() {
   };
 
   const applyFilters = () => {
+    setIsFilterOverlayPending(true);
+    setHasFilterFetchStarted(false);
     setStatusFilter(draftStatus);
     setPriorityFilter(draftPriority);
     setCallResultFilter(draftCallResult);
+    setLanguageFilters(draftLanguages);
     setCampaignFilter(draftCampaignId);
     setCreatedFromFilter(draftCreatedFrom);
     setCreatedToFilter(draftCreatedTo);
   };
 
   const resetFilters = () => {
+    setIsFilterOverlayPending(true);
+    setHasFilterFetchStarted(false);
     setDraftStatus([]);
     setDraftPriority([]);
     setDraftCallResult([]);
+    setDraftLanguages([]);
     setDraftCampaignId([]);
     setDraftCreatedFrom('');
     setDraftCreatedTo('');
     setStatusFilter([]);
     setPriorityFilter([]);
     setCallResultFilter([]);
+    setLanguageFilters([]);
     setCampaignFilter([]);
     setCreatedFromFilter('');
     setCreatedToFilter('');
+  };
+
+  const handlePageSizeChange = (nextPageSize: number) => {
+    setPageSize(nextPageSize);
+    setPage(1);
   };
 
   // Debounce the search input so we don't hammer the server on every keystroke.
@@ -312,17 +335,18 @@ export default function AgentLeadsPage() {
   // Reset to page 1 whenever filters/search change.
   useEffect(() => {
     setPage(1);
-  }, [debouncedSearch, serializedStatusFilter, serializedPriorityFilter, serializedCallResultFilter, serializedCampaignFilter, createdFromFilter, createdToFilter]);
+  }, [debouncedSearch, serializedStatusFilter, serializedPriorityFilter, serializedCallResultFilter, serializedLanguageFilter, serializedCampaignFilter, createdFromFilter, createdToFilter]);
 
   const { data, isLoading, isFetching } = useQuery({
-    queryKey: ['agent-leads', serializedStatusFilter, serializedPriorityFilter, serializedCallResultFilter, serializedCampaignFilter, createdFromFilter, createdToFilter, debouncedSearch, page],
+    queryKey: ['agent-leads', serializedStatusFilter, serializedPriorityFilter, serializedCallResultFilter, serializedLanguageFilter, serializedCampaignFilter, createdFromFilter, createdToFilter, debouncedSearch, page, pageSize],
     queryFn: () =>
       leadsService.list({
         page,
-        limit: PAGE_SIZE,
+        limit: pageSize,
         ...(serializedStatusFilter ? { status: serializedStatusFilter } : {}),
         ...(serializedPriorityFilter ? { priority: serializedPriorityFilter } : {}),
         ...(serializedCallResultFilter ? { callResult: serializedCallResultFilter } : {}),
+        ...(serializedLanguageFilter ? { language: serializedLanguageFilter } : {}),
         ...(serializedCampaignFilter ? { campaignId: serializedCampaignFilter } : {}),
         ...(createdFromFilter ? { from: createdFromFilter } : {}),
         ...(createdToFilter ? { to: createdToFilter } : {}),
@@ -330,6 +354,20 @@ export default function AgentLeadsPage() {
       }),
     placeholderData: (prev) => prev,
   });
+
+  useEffect(() => {
+    if (isFilterOverlayPending && isFetching) {
+      setHasFilterFetchStarted(true);
+    }
+  }, [isFilterOverlayPending, isFetching]);
+
+  useEffect(() => {
+    if (isFilterOverlayPending && hasFilterFetchStarted && !isFetching) {
+      setIsFilterOverlayPending(false);
+      setHasFilterFetchStarted(false);
+    }
+  }, [hasFilterFetchStarted, isFetching, isFilterOverlayPending]);
+
   const callState = useSyncExternalStore(stringeeService.subscribe, stringeeService.getSnapshot);
 
   // Disposition tags to populate the Call Result filter.
@@ -342,12 +380,21 @@ export default function AgentLeadsPage() {
     tagsData?.data?.data || tagsData?.data || [];
 
   const leads: Lead[] = data?.data?.data?.leads || [];
+  const languageOptions = Array.from(
+    new Map(
+      [...commonLanguages, ...leads.map((lead) => lead.lastCallLanguage || ''), ...languageFilters, ...draftLanguages]
+        .filter((value): value is string => Boolean(value && value.trim()))
+        .map((value) => [value.toLowerCase(), value]),
+    ).values(),
+  ).sort((left, right) => left.localeCompare(right));
   const total: number = data?.data?.data?.total || 0;
-  const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
-  const rangeStart = total === 0 ? 0 : (page - 1) * PAGE_SIZE + 1;
-  const rangeEnd = Math.min(page * PAGE_SIZE, total);
+  const totalPages = Math.max(1, Math.ceil(total / pageSize));
+  const rangeStart = total === 0 ? 0 : (page - 1) * pageSize + 1;
+  const rangeEnd = Math.min(page * pageSize, total);
   const filteredLeads = leads;
+  const showFilterOverlay = isFilterOverlayPending && !isLoading;
   const visibleOptionalColumns = AGENT_OPTIONAL_COLUMNS.filter((column) => visibleColumns[column.key]);
+  const tableColumnCount = 2 + visibleOptionalColumns.length;
   const tableWidths = getAgentTableWidths(visibleOptionalColumns.length);
   const useCompactTableLayout = visibleOptionalColumns.length <= 1;
   const toggleDraftColumn = (key: AgentOptionalColumnKey) =>
@@ -461,7 +508,18 @@ export default function AgentLeadsPage() {
             </div>
           )}
 
-          <section className="card card--mobile">
+          <section className="card card--mobile agent-leads-loading-surface">
+            {showFilterOverlay && (
+              <div className="agent-leads-loading-overlay" aria-live="polite" aria-busy="true">
+                <div className="agent-leads-loading-popup">
+                  <span className="agent-leads-loading-spinner" />
+                  <div>
+                    <div className="agent-leads-loading-title">Applying filters...</div>
+                    <div className="agent-leads-loading-subtitle">Refreshing your lead list</div>
+                  </div>
+                </div>
+              </div>
+            )}
             {isLoading ? (
               <div className="empty-state">Loading your leads...</div>
             ) : !selectedLead ? (
@@ -549,7 +607,7 @@ export default function AgentLeadsPage() {
             })()}
           </section>
 
-          {total > PAGE_SIZE && (
+          {total > 0 && (
             <section className="card card--mobile agent-mobile-pagination-card">
               <div className="agent-mobile-pagination">
                 <div>
@@ -560,6 +618,19 @@ export default function AgentLeadsPage() {
                   <button className="btn-icon" onClick={() => setPage((p) => Math.max(1, p - 1))} disabled={page <= 1}><ChevronLeft size={16} /></button>
                   <button className="btn-icon" onClick={() => setPage((p) => Math.min(totalPages, p + 1))} disabled={page >= totalPages}><ChevronRight size={16} /></button>
                 </div>
+              </div>
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, marginTop: 12 }}>
+                <span style={{ fontSize: '0.82rem', color: 'var(--text-secondary)' }}>Rows per page</span>
+                <select
+                  className="form-input"
+                  value={pageSize}
+                  onChange={(e) => handlePageSizeChange(Number(e.target.value))}
+                  style={{ width: 88, padding: '8px 10px', fontSize: '0.85rem' }}
+                >
+                  {PAGE_SIZE_OPTIONS.map((option) => (
+                    <option key={option} value={option}>{option}</option>
+                  ))}
+                </select>
               </div>
             </section>
           )}
@@ -627,6 +698,16 @@ export default function AgentLeadsPage() {
                           };
                         }),
                       ]}
+                      height={42}
+                    />
+                  </div>
+                  <div className="agent-mobile-sheet__field">
+                    <div className="agent-mobile-sheet__label">Language</div>
+                    <MultiSelectDropdown
+                      values={draftLanguages}
+                      onChange={setDraftLanguages}
+                      placeholder="All languages"
+                      options={languageOptions.map((language) => ({ value: language, label: language }))}
                       height={42}
                     />
                   </div>
@@ -773,6 +854,15 @@ export default function AgentLeadsPage() {
                 ]}
               />
             </div>
+            <div className="form-group" style={{ width: 170 }}>
+              <label className="form-label">Language</label>
+              <MultiSelectDropdown
+                values={draftLanguages}
+                onChange={setDraftLanguages}
+                placeholder="All"
+                options={languageOptions.map((language) => ({ value: language, label: language }))}
+              />
+            </div>
             <div className="form-group" style={{ width: 150 }}>
               <label className="form-label">Priority</label>
               <MultiSelectDropdown
@@ -835,7 +925,18 @@ export default function AgentLeadsPage() {
             </div>
           </div>
 
-          <div className="card" style={{ overflow: 'hidden' }}>
+          <div className="card agent-leads-loading-surface" style={{ overflow: 'hidden' }}>
+            {showFilterOverlay && (
+              <div className="agent-leads-loading-overlay" aria-live="polite" aria-busy="true">
+                <div className="agent-leads-loading-popup">
+                  <span className="agent-leads-loading-spinner" />
+                  <div>
+                    <div className="agent-leads-loading-title">Applying filters...</div>
+                    <div className="agent-leads-loading-subtitle">Refreshing your lead list</div>
+                  </div>
+                </div>
+              </div>
+            )}
             <div className="table-container">
               <table
                 className="table"
@@ -852,6 +953,7 @@ export default function AgentLeadsPage() {
                   {visibleColumns.followupStatus && <col style={{ width: tableWidths.optional }} />}
                   {visibleColumns.callResult && <col style={{ width: tableWidths.optional }} />}
                   {visibleColumns.campaign && <col style={{ width: tableWidths.optional }} />}
+                  {visibleColumns.language && <col style={{ width: tableWidths.optional }} />}
                   {visibleColumns.createdTime && <col style={{ width: tableWidths.optional }} />}
                   {visibleColumns.lastCalled && <col style={{ width: tableWidths.optional }} />}
                   <col style={{ width: tableWidths.actions }} />
@@ -862,6 +964,7 @@ export default function AgentLeadsPage() {
                     {visibleColumns.followupStatus && <th style={{ padding: '14px 16px', textAlign: 'left', fontSize: '0.7rem', textTransform: 'uppercase', color: 'var(--text-muted)', letterSpacing: '0.06em', fontWeight: 600 }}>Followup Status</th>}
                     {visibleColumns.callResult && <th style={{ padding: '14px 16px', textAlign: 'left', fontSize: '0.7rem', textTransform: 'uppercase', color: 'var(--text-muted)', letterSpacing: '0.06em', fontWeight: 600 }}>Call Result</th>}
                     {visibleColumns.campaign && <th style={{ padding: '14px 16px', textAlign: 'left', fontSize: '0.7rem', textTransform: 'uppercase', color: 'var(--text-muted)', letterSpacing: '0.06em', fontWeight: 600 }}>Campaign</th>}
+                    {visibleColumns.language && <th style={{ padding: '14px 16px', textAlign: 'left', fontSize: '0.7rem', textTransform: 'uppercase', color: 'var(--text-muted)', letterSpacing: '0.06em', fontWeight: 600 }}>Language</th>}
                     {visibleColumns.createdTime && <th style={{ padding: '14px 16px', textAlign: 'left', fontSize: '0.7rem', textTransform: 'uppercase', color: 'var(--text-muted)', letterSpacing: '0.06em', fontWeight: 600 }}>Created Time</th>}
                     {visibleColumns.lastCalled && <th style={{ padding: '14px 16px', textAlign: 'left', fontSize: '0.7rem', textTransform: 'uppercase', color: 'var(--text-muted)', letterSpacing: '0.06em', fontWeight: 600 }}>Last Called</th>}
                     <th style={{ padding: '14px 20px', textAlign: 'right', fontSize: '0.7rem', textTransform: 'uppercase', color: 'var(--text-muted)', letterSpacing: '0.06em', fontWeight: 600 }}>
@@ -955,9 +1058,9 @@ export default function AgentLeadsPage() {
                 </thead>
                 <tbody style={{ background: 'var(--bg-surface)' }}>
                   {isLoading ? (
-                    <tr><td colSpan={7}><div className="empty-state">Loading your leads...</div></td></tr>
+                    <tr><td colSpan={tableColumnCount}><div className="empty-state">Loading your leads...</div></td></tr>
                   ) : filteredLeads.length === 0 ? (
-                    <tr><td colSpan={7}><div className="empty-state">No leads match the current filters.</div></td></tr>
+                    <tr><td colSpan={tableColumnCount}><div className="empty-state">No leads match the current filters.</div></td></tr>
                   ) : (
                     filteredLeads.map((lead) => {
                       const colors = STATUS_COLORS[lead.status] || STATUS_COLORS.uncontacted;
@@ -1036,6 +1139,11 @@ export default function AgentLeadsPage() {
                             </span>
                           </td>
                         )}
+                        {visibleColumns.language && (
+                          <td style={{ padding: '14px 16px', color: 'var(--text-secondary)', fontSize: '0.85rem' }}>
+                            {lead.lastCallLanguage || <span style={{ color: 'var(--text-muted)', fontSize: '0.8rem', fontStyle: 'italic' }}>—</span>}
+                          </td>
+                        )}
                         {visibleColumns.createdTime && (
                           <td style={{ padding: '14px 16px' }}>
                             <div style={{ display: 'flex', alignItems: 'center', gap: 6, color: 'var(--text-secondary)', fontSize: '0.8rem' }}>
@@ -1095,7 +1203,7 @@ export default function AgentLeadsPage() {
                 </tbody>
               </table>
             </div>
-            {total > PAGE_SIZE && (
+            {total > 0 && (
               <div
                 style={{
                   display: 'flex',
@@ -1108,7 +1216,18 @@ export default function AgentLeadsPage() {
                   color: 'var(--text-secondary)',
                 }}
               >
-                <div>
+                <div style={{ display: 'inline-flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+                  <span>Rows per page</span>
+                  <select
+                    className="form-input"
+                    value={pageSize}
+                    onChange={(e) => handlePageSizeChange(Number(e.target.value))}
+                    style={{ width: 84, padding: '6px 10px', fontSize: '0.8rem' }}
+                  >
+                    {PAGE_SIZE_OPTIONS.map((option) => (
+                      <option key={option} value={option}>{option}</option>
+                    ))}
+                  </select>
                   Page <strong style={{ color: 'var(--text-primary)' }}>{page}</strong> of{' '}
                   <strong style={{ color: 'var(--text-primary)' }}>{totalPages}</strong>
                   {isFetching && <span style={{ marginLeft: 10, opacity: 0.6 }}>Loading…</span>}

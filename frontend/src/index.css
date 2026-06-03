@@ -2620,7 +2620,76 @@ input, textarea, select { font-family: inherit; }
   border-radius: var(--radius);
 }
 
+.agent-leads-loading-surface {
+  position: relative;
+}
+
+.agent-leads-loading-overlay {
+  position: absolute;
+  inset: 0;
+  z-index: 20;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 20px;
+  background: rgba(255, 255, 255, 0.5);
+  backdrop-filter: blur(4px);
+  pointer-events: all;
+}
+
+.agent-leads-loading-popup {
+  display: inline-flex;
+  align-items: center;
+  gap: 14px;
+  min-width: 250px;
+  max-width: min(92vw, 320px);
+  padding: 16px 18px;
+  border-radius: 18px;
+  border: 1px solid rgba(99, 102, 241, 0.16);
+  background: rgba(255, 255, 255, 0.96);
+  box-shadow: 0 20px 40px rgba(15, 23, 42, 0.14);
+}
+
+.agent-leads-loading-spinner {
+  width: 18px;
+  height: 18px;
+  border: 2px solid rgba(99, 102, 241, 0.18);
+  border-top-color: #6366f1;
+  border-radius: 50%;
+  animation: spin 0.7s linear infinite;
+  flex-shrink: 0;
+}
+
+.agent-leads-loading-title {
+  font-size: 0.95rem;
+  font-weight: 700;
+  color: var(--text-primary);
+}
+
+.agent-leads-loading-subtitle {
+  margin-top: 3px;
+  font-size: 0.8rem;
+  color: var(--text-secondary);
+}
+
 @keyframes shimmer { to { background-position: -200% 0; } }
+
+@media (max-width: 720px) {
+  .agent-leads-loading-overlay {
+    padding: 14px;
+  }
+
+  .agent-leads-loading-popup {
+    width: 100%;
+    min-width: 0;
+    padding: 14px 16px;
+    border-radius: 16px;
+  }
+
+  .agent-leads-loading-title {
+    font-size: 0.9rem;
+  }
+}
 
 
 /* ── Filter Bar ──────────────────────────────────────────────────────── */

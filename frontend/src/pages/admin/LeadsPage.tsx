@@ -32,6 +32,8 @@ const DEFAULT_VISIBLE_COLUMNS: Record<OptionalColumnKey, boolean> = {
   lastCalled: true,
 };
 
+const PAGE_SIZE_OPTIONS = [10, 25, 50] as const;
+
 const LEADS_VISIBLE_COLUMNS_STORAGE_KEY = 'admin-leads-visible-columns';
 
 const DATE_RANGE_PRESETS: DateRangePreset[] = ['today', 'yesterday', 'last_7_days', 'this_month'];
@@ -389,7 +391,7 @@ export default function LeadsPage() {
   const [draftVisibleColumns, setDraftVisibleColumns] = useState<Record<OptionalColumnKey, boolean>>(visibleColumns);
   const [selected, setSelected] = useState<string[]>([]);
   const [confirmDelete, setConfirmDelete] = useState<string[] | null>(null);
-  const LIMIT = 50;
+  const [pageSize, setPageSize] = useState<number>(10);
 
   useEffect(() => {
     if (!isColumnMenuOpen) return;
@@ -458,11 +460,16 @@ export default function LeadsPage() {
     setPage(1);
   };
 
+  const handlePageSizeChange = (nextPageSize: number) => {
+    setPageSize(nextPageSize);
+    setPage(1);
+  };
+
   const { data: leadsData, isLoading } = useQuery({
-    queryKey: ['leads', page, serializedCampaignFilters, serializedStatusFilters, serializedAgentFilters, serializedCallResultFilters, serializedLanguageFilters, createdFromFilter, createdToFilter],
+    queryKey: ['leads', page, pageSize, serializedCampaignFilters, serializedStatusFilters, serializedAgentFilters, serializedCallResultFilters, serializedLanguageFilters, createdFromFilter, createdToFilter],
     queryFn: () => leadsService.list({ 
       page, 
-      limit: LIMIT, 
+      limit: pageSize, 
       ...(serializedCampaignFilters ? { campaignId: serializedCampaignFilters } : {}), 
       ...(serializedStatusFilters ? { status: serializedStatusFilters } : {}),
       ...(serializedAgentFilters ? { assignedToId: serializedAgentFilters } : {}),
@@ -567,7 +574,7 @@ export default function LeadsPage() {
   const total: number = leadsData?.data?.data?.total || 0;
   const campaigns = campaignsData?.data?.data?.campaigns || [];
   const agents = agentsData?.data?.data?.users || [];
-  const pages = Math.ceil(total / LIMIT);
+  const pages = Math.max(1, Math.ceil(total / pageSize));
   const callState = useSyncExternalStore(stringeeService.subscribe, stringeeService.getSnapshot);
 
   const statusColour: Record<string, string> = {
@@ -1033,8 +1040,21 @@ export default function LeadsPage() {
         </div>
 
         {/* Pagination */}
-        {pages > 1 && (
+        {total > 0 && (
           <div className="pagination">
+            <div style={{ display: 'inline-flex', alignItems: 'center', gap: 8, color: 'var(--text-secondary)', fontSize: '0.875rem' }}>
+              <span>Rows per page</span>
+              <select
+                className="form-input"
+                value={pageSize}
+                onChange={(e) => handlePageSizeChange(Number(e.target.value))}
+                style={{ width: 84, padding: '6px 10px', fontSize: '0.85rem' }}
+              >
+                {PAGE_SIZE_OPTIONS.map((option) => (
+                  <option key={option} value={option}>{option}</option>
+                ))}
+              </select>
+            </div>
             <button className="btn btn-secondary" disabled={page === 1} onClick={() => setPage(p => p - 1)}>
               <ChevronLeft size={16} />
             </button>

@@ -1,11 +1,76 @@
 import { useState } from 'react';
+import {
+  Chart as ChartJS,
+  ArcElement,
+  Tooltip,
+  Legend,
+  type Plugin,
+} from 'chart.js';
+import { Pie } from 'react-chartjs-2';
 import { useQuery } from '@tanstack/react-query';
 import { usersService, campaignsService, leadsService, callsService } from '../../services/crm.service';
 import AppLayout from '../../components/layout/AppLayout';
 import DateRangeFilter, { computeRange, type DateRangeValue } from '../../components/ui/DateRangeFilter';
 import Dropdown from '../../components/ui/Dropdown';
-import { Users, FolderOpen, Phone, TrendingUp, UserCheck, Clock, AlertCircle, ChevronRight } from 'lucide-react';
+import { Users, FolderOpen, Phone, TrendingUp, UserCheck, Clock, AlertCircle, ChevronRight, Languages } from 'lucide-react';
 import { Link } from 'react-router-dom';
+
+ChartJS.register(ArcElement, Tooltip, Legend);
+
+const LANGUAGE_CHART_COLOURS = [
+  '#5f6bff',
+  '#22c55e',
+  '#f59e0b',
+  '#22d3ee',
+  '#ef4444',
+  '#8b5cf6',
+  '#ec4899',
+  '#14b8a6',
+  '#f97316',
+  '#84cc16',
+];
+
+const languagePercentagePlugin: Plugin<'pie'> = {
+  id: 'languagePercentagePlugin',
+  afterDatasetsDraw(chart) {
+    const dataset = chart.data.datasets[0];
+    const values = (dataset?.data || []).map((value) => Number(value) || 0);
+    const total = values.reduce((sum, value) => sum + value, 0);
+    if (!total) return;
+
+    const { ctx } = chart;
+    const meta = chart.getDatasetMeta(0);
+    const arcs = meta.data as ArcElement[];
+
+    ctx.save();
+    ctx.font = '600 12px Inter, sans-serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+
+    arcs.forEach((arc, index) => {
+      const value = values[index];
+      if (!value) return;
+
+      const percentage = Math.round((value / total) * 100);
+      if (percentage < 8) return;
+
+      const angle = arc.circumference;
+      if (!angle || angle < 0.3) return;
+
+      const radius = arc.innerRadius + (arc.outerRadius - arc.innerRadius) * 0.62;
+      const x = arc.x + Math.cos(arc.startAngle + angle / 2) * radius;
+      const y = arc.y + Math.sin(arc.startAngle + angle / 2) * radius;
+
+      ctx.fillStyle = '#ffffff';
+      ctx.strokeStyle = 'rgba(15, 23, 42, 0.18)';
+      ctx.lineWidth = 3;
+      ctx.strokeText(`${percentage}%`, x, y);
+      ctx.fillText(`${percentage}%`, x, y);
+    });
+
+    ctx.restore();
+  },
+};
 
 // ── Stat Card ─────────────────────────────────────────────────────────
 
@@ -127,6 +192,14 @@ export default function AdminDashboard() {
     queryFn: () => leadsService.list({ limit: 1, ...dashboardParams }),
   });
 
+  const totalLeads = (leadsData?.data?.data?.total as number) || 0;
+
+  const { data: languageLeadsData } = useQuery({
+    queryKey: ['leads', 'dashboard', 'languages', dateRange.from, dateRange.to, campaignFilter, totalLeads],
+    queryFn: () => leadsService.list({ limit: Math.max(totalLeads, 1), ...dashboardParams }),
+    enabled: totalLeads > 0,
+  });
+
   const { data: callsSummary } = useQuery({
     queryKey: ['calls', 'summary', dateRange.from, dateRange.to, campaignFilter],
     queryFn: () => callsService.summary(dashboardParams),
@@ -136,8 +209,8 @@ export default function AdminDashboard() {
   const campaigns = (campaignsData?.data?.data?.campaigns || []) as Record<string, unknown>[];
   const selectedCampaign = campaigns.find((c) => (c.id as string) === campaignFilter) || null;
   const campaignScope = selectedCampaign ? [selectedCampaign] : campaigns;
-  const totalLeads = (leadsData?.data?.data?.total as number) || 0;
   const callData = callsSummary?.data?.data;
+  const languageLeads = (languageLeadsData?.data?.data?.leads || []) as Array<{ lastCallLanguage?: string | null }>;
   const agents = users.filter((u) => u.role === 'agent');
   const activeCampaigns = campaignScope.filter((c) => c.status === 'active').length;
   const totalCalls = callData?.dailyTotals?.reduce((s: number, d: { count: number }) => s + d.count, 0) || 0;
@@ -145,6 +218,49 @@ export default function AdminDashboard() {
   const callbackCount = callData?.tagBreakdown?.find((tag: { tag: string }) => tag.tag === 'Callback')?.count || 0;
   const connectRate = totalCalls ? Math.round((connectedCalls / totalCalls) * 100) : 0;
   const scopeLabel = selectedCampaign ? `${selectedCampaign.name as string} in ${rangeLabel.toLowerCase()}` : rangeLabel.toLowerCase();
+  const languageCounts = languageLeads.reduce((totals: Record<string, number>, lead) => {
+    const language = lead.lastCallLanguage?.trim();
+    if (!language) return totals;
+    totals[language] = (totals[language] || 0) + 1;
+    return totals;
+  }, {});
+  const languageBreakdown = Object.entries(languageCounts)
+    .map(([language, count]) => ({ language, count }))
+    .sort((left, right) => right.count - left.count);
+  const totalLanguageTaggedLeads = languageBreakdown.reduce((sum, entry) => sum + entry.count, 0);
+  const languageChartData = {
+    labels: languageBreakdown.map((entry) => entry.language),
+    datasets: [
+      {
+        data: languageBreakdown.map((entry) => entry.count),
+        backgroundColor: languageBreakdown.map((_, index) => LANGUAGE_CHART_COLOURS[index % LANGUAGE_CHART_COLOURS.length]),
+        borderColor: '#ffffff',
+        borderWidth: 2,
+      },
+    ],
+  };
+  const languageChartOptions = {
+    responsive: true,
+    maintainAspectRatio: false,
+    plugins: {
+      legend: { display: false },
+      tooltip: {
+        backgroundColor: '#1e293b',
+        borderColor: '#334155',
+        borderWidth: 1,
+        titleColor: '#f8fafc',
+        bodyColor: '#cbd5e1',
+        callbacks: {
+          label: (context: { label: string; parsed: number }) => {
+            const percentage = totalLanguageTaggedLeads
+              ? Math.round((context.parsed / totalLanguageTaggedLeads) * 100)
+              : 0;
+            return `${context.label}: ${context.parsed} (${percentage}%)`;
+          },
+        },
+      },
+    },
+  };
 
   return (
     <AppLayout>
@@ -256,6 +372,75 @@ export default function AdminDashboard() {
                   <div className="empty-state">
                     <AlertCircle size={32} />
                     <p>No calls logged yet</p>
+                  </div>
+                )}
+              </div>
+            </div>
+
+            <div className="card">
+              <div className="card-header card-header--dense">
+                <div>
+                  <div className="card-kicker">Language mix</div>
+                  <h2 className="card-title">Language Breakdown</h2>
+                </div>
+                <span className="card-subtitle">{rangeLabel}</span>
+              </div>
+              <div className="card-body">
+                {languageBreakdown.length ? (
+                  <div
+                    style={{
+                      display: 'grid',
+                      gridTemplateColumns: 'minmax(180px, 240px) minmax(0, 1fr)',
+                      gap: 20,
+                      alignItems: 'center',
+                    }}
+                  >
+                    <div style={{ height: 220, position: 'relative' }}>
+                      <Pie data={languageChartData} options={languageChartOptions as never} plugins={[languagePercentagePlugin]} />
+                    </div>
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+                      {languageBreakdown.map((entry, index) => (
+                        <div
+                          key={entry.language}
+                          style={{
+                            display: 'flex',
+                            alignItems: 'center',
+                            justifyContent: 'space-between',
+                            gap: 12,
+                            padding: '10px 12px',
+                            border: '1px solid var(--border)',
+                            borderRadius: 12,
+                            background: 'var(--bg-elevated)',
+                          }}
+                        >
+                          <span style={{ display: 'flex', alignItems: 'center', gap: 10, minWidth: 0 }}>
+                            <span
+                              style={{
+                                width: 10,
+                                height: 10,
+                                borderRadius: '50%',
+                                background: LANGUAGE_CHART_COLOURS[index % LANGUAGE_CHART_COLOURS.length],
+                                flexShrink: 0,
+                              }}
+                            />
+                            <span style={{ color: 'var(--text-primary)', fontSize: '1rem', fontWeight: 500, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                              {entry.language}
+                            </span>
+                          </span>
+                          <span style={{ display: 'flex', alignItems: 'baseline', gap: 8, color: 'var(--text-secondary)', flexShrink: 0 }}>
+                            <span style={{ fontSize: '0.98rem', fontWeight: 700 }}>{entry.count}</span>
+                            <span style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>
+                              {Math.round((entry.count / totalLanguageTaggedLeads) * 100)}%
+                            </span>
+                          </span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                ) : (
+                  <div className="empty-state">
+                    <Languages size={32} />
+                    <p>No language data available</p>
                   </div>
                 )}
               </div>
