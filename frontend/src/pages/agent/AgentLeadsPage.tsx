@@ -760,7 +760,7 @@ export default function AgentLeadsPage() {
           </div>
         </div>
 
-        <div className="card" style={{ border: 'none', background: 'transparent' }}>
+        <div className="card" style={{ border: 'none', background: 'transparent', overflow: 'visible', position: 'relative', zIndex: 2 }}>
           <div
             style={{
               display: 'flex',

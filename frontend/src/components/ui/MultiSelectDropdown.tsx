@@ -21,7 +21,23 @@ export default function MultiSelectDropdown({
   height?: number;
 }) {
   const [open, setOpen] = useState(false);
+  const [menuPlacement, setMenuPlacement] = useState<'top' | 'bottom'>('bottom');
+  const [menuMaxHeight, setMenuMaxHeight] = useState(320);
   const ref = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!open || !ref.current || typeof window === 'undefined') return;
+
+    const rect = ref.current.getBoundingClientRect();
+    const viewportHeight = window.innerHeight;
+    const spaceBelow = viewportHeight - rect.bottom - 12;
+    const spaceAbove = rect.top - 12;
+    const shouldOpenUp = spaceBelow < 220 && spaceAbove > spaceBelow;
+    const availableSpace = Math.max(160, shouldOpenUp ? spaceAbove : spaceBelow);
+
+    setMenuPlacement(shouldOpenUp ? 'top' : 'bottom');
+    setMenuMaxHeight(Math.min(320, availableSpace));
+  }, [open, options.length]);
 
   useEffect(() => {
     if (!open) return;
@@ -111,10 +127,12 @@ export default function MultiSelectDropdown({
         <div
           style={{
             position: 'absolute',
-            top: 'calc(100% + 4px)',
+            ...(menuPlacement === 'bottom'
+              ? { top: 'calc(100% + 4px)' }
+              : { bottom: 'calc(100% + 4px)' }),
             left: 0,
             right: 0,
-            maxHeight: 320,
+            maxHeight: menuMaxHeight,
             overflowY: 'auto',
             background: '#fff',
             border: '1px solid #e2e8f0',

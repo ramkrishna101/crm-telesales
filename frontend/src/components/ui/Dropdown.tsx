@@ -21,6 +21,8 @@ export default function Dropdown({
   height?: number;
 }) {
   const [open, setOpen] = useState(false);
+  const [menuPlacement, setMenuPlacement] = useState<'top' | 'bottom'>('bottom');
+  const [menuMaxHeight, setMenuMaxHeight] = useState(280);
   const ref = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -38,6 +40,20 @@ export default function Dropdown({
       document.removeEventListener('keydown', esc);
     };
   }, [open]);
+
+  useEffect(() => {
+    if (!open || !ref.current || typeof window === 'undefined') return;
+
+    const rect = ref.current.getBoundingClientRect();
+    const viewportHeight = window.innerHeight;
+    const spaceBelow = viewportHeight - rect.bottom - 12;
+    const spaceAbove = rect.top - 12;
+    const shouldOpenUp = spaceBelow < 200 && spaceAbove > spaceBelow;
+    const availableSpace = Math.max(140, shouldOpenUp ? spaceAbove : spaceBelow);
+
+    setMenuPlacement(shouldOpenUp ? 'top' : 'bottom');
+    setMenuMaxHeight(Math.min(280, availableSpace));
+  }, [open, options.length]);
 
   const selected = options.find((o) => o.value === value);
 
@@ -100,10 +116,12 @@ export default function Dropdown({
         <div
           style={{
             position: 'absolute',
-            top: 'calc(100% + 4px)',
+            ...(menuPlacement === 'bottom'
+              ? { top: 'calc(100% + 4px)' }
+              : { bottom: 'calc(100% + 4px)' }),
             left: 0,
             right: 0,
-            maxHeight: 280,
+            maxHeight: menuMaxHeight,
             overflowY: 'auto',
             background: '#fff',
             border: '1px solid #e2e8f0',
