@@ -39,7 +39,7 @@ const FOLLOWUP_STATUS_OPTIONS = [
   { value: 'invalid', label: 'Invalid' },
 ] as const;
 
-const COMMON_LANGUAGE_OPTIONS = ['Hindi', 'Kannada', 'Telugu', 'Tamil', 'English', 'Malayalam', 'Marathi', 'Bengali', 'Other'];
+const COMMON_LANGUAGE_OPTIONS = ['Hindi', 'Kannada', 'Telugu', 'Tamil', 'Malayalam', 'Not Required', 'Other'];
 
 function maskPhone(phone?: string | null) {
   if (!phone) return '—';

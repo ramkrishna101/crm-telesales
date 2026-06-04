@@ -52,7 +52,7 @@ const AGENT_DEFAULT_VISIBLE_COLUMNS: Record<AgentOptionalColumnKey, boolean> = {
 
 const PAGE_SIZE_OPTIONS = [10, 25, 50] as const;
 
-const COMMON_LANGUAGE_OPTIONS = ['Hindi', 'Kannada', 'Telugu', 'Tamil', 'English', 'Malayalam', 'Marathi', 'Bengali', 'Other'];
+const COMMON_LANGUAGE_OPTIONS = ['Hindi', 'Kannada', 'Telugu', 'Tamil', 'Malayalam', 'Not Required', 'Other'];
 
 const AGENT_LEADS_VISIBLE_COLUMNS_STORAGE_KEY = 'agent-leads-visible-columns';
 

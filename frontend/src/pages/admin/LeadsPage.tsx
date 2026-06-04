@@ -355,7 +355,7 @@ function UploadPanel({ campaigns, onDone, onClose }: {
 
 export default function LeadsPage() {
   const qc = useQueryClient();
-  const commonLanguages = ['Hindi', 'Kannada', 'Telugu', 'Tamil', 'English', 'Malayalam', 'Marathi', 'Bengali'];
+  const commonLanguages = ['Hindi', 'Kannada', 'Telugu', 'Tamil', 'Malayalam', 'Not Required'];
   const columnMenuRef = useRef<HTMLDivElement>(null);
   const [draftCampaignFilters, setDraftCampaignFilters] = useState<string[]>([]);
   const [campaignFilters, setCampaignFilters] = useState<string[]>([]);

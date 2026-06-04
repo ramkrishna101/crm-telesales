@@ -22,7 +22,7 @@ const logCallSchema = z.object({
   leadId: z.string().uuid(),
   dispositionTag: z.string().min(1),
   durationSeconds: z.number().int().min(0).default(0),
-  language: z.string().trim().min(1).max(80).optional(),
+  language: z.string().trim().min(1).max(80),
   notes: z.string().max(2000).optional(),
   telephonyRef: z.string().optional(),
   // Optional lifecycle stage. When omitted, the lead's current status is preserved

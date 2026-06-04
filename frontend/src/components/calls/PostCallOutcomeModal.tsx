@@ -17,13 +17,11 @@ const STATUS_LABELS: Record<string, { label: string; bg: string; fg: string }> =
 };
 
 const LANGUAGE_OPTIONS = [
-  'English',
   'Hindi',
   'Telugu',
   'Tamil',
   'Kannada',
-  'Marathi',
-  'Bengali',
+  'Not Required',
   'Other',
 ];
 
@@ -113,6 +111,8 @@ export default function PostCallOutcomeModal() {
   const liveLead = leadData?.data?.data;
   const previousDisposition: string | null = liveLead?.callLogs?.[0]?.dispositionTag || null;
   const previousNotes: string | null = liveLead?.callLogs?.[0]?.notes || null;
+  const previousLanguage: string = liveLead?.language || liveLead?.lastCallLanguage || '';
+  const currentFollowupStatus: string = liveLead?.status || '';
 
   const [dispositionTag, setDispositionTag] = useState('');
   const [language, setLanguage] = useState('');
@@ -125,13 +125,13 @@ export default function PostCallOutcomeModal() {
   useEffect(() => {
     if (state.lastCall) {
       setDispositionTag('');
-      setLanguage('');
-      setFollowupStatus('');
+      setLanguage(previousLanguage);
+      setFollowupStatus(currentFollowupStatus);
       setFollowupDate('');
       setFollowupTime('');
       setDescription('');
     }
-  }, [state.lastCall?.endedAt, state.lastCall]);
+  }, [currentFollowupStatus, previousLanguage, state.lastCall?.endedAt, state.lastCall]);
 
   // Fetch the server-side CDR from Stringee. The CDR is eventually consistent
   // (usually written within ~3-5s of hangup), so we poll until duration > 0.
@@ -161,11 +161,12 @@ export default function PostCallOutcomeModal() {
     mutationFn: async () => {
       if (!state.lastCall) return;
       if (!dispositionTag) throw new Error('Call Result is required');
+      if (!language) throw new Error('Language is required');
 
       const scheduledAt = resolveReminderSchedule(followupDate, followupTime);
 
       const notesParts: string[] = [];
-      if (language) notesParts.push(`Language: ${language}`);
+      notesParts.push(`Language: ${language}`);
       if (description) notesParts.push(description);
 
       await callsService.log({
@@ -267,7 +268,7 @@ export default function PostCallOutcomeModal() {
           mobile={isMobile}
         />
       </Field>
-      <Field label="Language" mobile={isMobile}>
+      <Field label="Language" required mobile={isMobile}>
         <Dropdown
           value={language}
           onChange={setLanguage}
@@ -321,6 +322,7 @@ export default function PostCallOutcomeModal() {
   const callInformationSection = (
     <Section
       title="Call Information"
+      defaultOpen={false}
       mobile={isMobile}
       sectionClassName={isMobile ? 'agent-mobile-outcome-sheet__section--summary' : undefined}
       right={(() => {
@@ -344,7 +346,7 @@ export default function PostCallOutcomeModal() {
   );
 
   const outcomeSection = (
-    <Section title="Outcome Of Outgoing Call" mobile={isMobile}>
+    <Section title="Outcome Of Outgoing Call" defaultOpen mobile={isMobile}>
       {outcomeBody}
     </Section>
   );
@@ -425,13 +427,13 @@ export default function PostCallOutcomeModal() {
           </button>
           <button
             onClick={() => logMutation.mutate()}
-            disabled={logMutation.isPending || !dispositionTag}
+            disabled={logMutation.isPending || !dispositionTag || !language}
             className={isMobile ? 'agent-mobile-outcome-sheet__primary' : undefined}
             style={{
               padding: isMobile ? '12px 22px' : '8px 22px', fontSize: 14, fontWeight: 600,
-              background: dispositionTag ? '#3b82f6' : '#94a3b8',
+              background: dispositionTag && language ? '#3b82f6' : '#94a3b8',
               color: '#fff', border: 'none', borderRadius: 8,
-              cursor: dispositionTag && !logMutation.isPending ? 'pointer' : 'not-allowed',
+              cursor: dispositionTag && language && !logMutation.isPending ? 'pointer' : 'not-allowed',
               width: isMobile ? '100%' : 'auto',
             }}
           >
@@ -451,17 +453,37 @@ const inputStyle: React.CSSProperties = {
   color: '#0f172a',
 };
 
-function Section({ title, right, children, mobile, sectionClassName }: { title: string; right?: React.ReactNode; children: React.ReactNode; mobile?: boolean; sectionClassName?: string }) {
+function Section({ title, right, children, mobile, sectionClassName, defaultOpen = true }: { title: string; right?: React.ReactNode; children: React.ReactNode; mobile?: boolean; sectionClassName?: string; defaultOpen?: boolean }) {
+  const [open, setOpen] = useState(defaultOpen);
+
   return (
     <div className={[mobile ? 'agent-mobile-outcome-sheet__section' : '', sectionClassName || ''].filter(Boolean).join(' ')} style={{ borderBottom: '1px solid #f1f5f9' }}>
       <div style={{
         padding: mobile ? '12px 16px' : '12px 24px', display: 'flex', flexDirection: mobile ? 'column' : 'row', justifyContent: 'space-between', alignItems: mobile ? 'flex-start' : 'center', gap: mobile ? 8 : 12,
         background: mobile ? 'transparent' : '#f8fafc',
       }}>
-        <div style={{ fontSize: 14, fontWeight: 700, color: '#0f172a' }}>{mobile ? title : `▼ ${title}`}</div>
+        <button
+          type="button"
+          onClick={() => setOpen((current) => !current)}
+          style={{
+            border: 'none',
+            background: 'transparent',
+            padding: 0,
+            display: 'inline-flex',
+            alignItems: 'center',
+            gap: 8,
+            cursor: 'pointer',
+            fontSize: 14,
+            fontWeight: 700,
+            color: '#0f172a',
+          }}
+        >
+          <ChevronDown size={16} style={{ transform: open ? 'rotate(0deg)' : 'rotate(-90deg)', transition: 'transform 120ms' }} />
+          <span>{title}</span>
+        </button>
         {right}
       </div>
-      <div style={{ padding: mobile ? '16px' : '18px 24px' }}>{children}</div>
+      {open && <div style={{ padding: mobile ? '16px' : '18px 24px' }}>{children}</div>}
     </div>
   );
 }
