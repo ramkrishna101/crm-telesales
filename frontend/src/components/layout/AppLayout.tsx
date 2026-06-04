@@ -45,7 +45,7 @@ const supervisorNav: NavItem[] = [
 ];
 
 const agentNav: NavItem[] = [
-  { icon: <LayoutDashboard size={18} />, label: 'Workspace', to: '/agent' },
+  { icon: <LayoutDashboard size={18} />, label: 'Dashboard', to: '/agent' },
   { icon: <Users size={18} />, label: 'My Leads', to: '/agent/leads' },
   { icon: <ListChecks size={18} />, label: 'Follow-ups', to: '/agent/follow-ups' },
   { icon: <PhoneCall size={18} />, label: 'Call History', to: '/agent/calls' },
@@ -69,7 +69,7 @@ const roleTitles = {
   super_admin: 'Super Admin',
   branch_admin: 'Branch Admin',
   supervisor: 'Supervisor',
-  agent: 'Agent Workspace',
+  agent: 'Agent Dashboard',
 };
 
 export default function AppLayout({ children }: { children: React.ReactNode }) {
@@ -110,7 +110,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
       <div className="agent-mobile-app">
         <div className="agent-mobile-topbar">
           <div>
-            <div className="agent-mobile-topbar__eyebrow">Agent Workspace</div>
+            <div className="agent-mobile-topbar__eyebrow">Agent Dashboard</div>
             <div className="agent-mobile-topbar__title">{activeItem?.label || 'Dashboard'}</div>
           </div>
           <div className="agent-mobile-topbar__meta">
@@ -153,7 +153,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
         </div>
 
         <nav className="sidebar-nav">
-          <div className="sidebar-nav-section">Workspace</div>
+          <div className="sidebar-nav-section">{role === 'agent' ? 'Dashboard' : 'Workspace'}</div>
           {navItems.map((item) => (
             <NavLink
               key={item.to}

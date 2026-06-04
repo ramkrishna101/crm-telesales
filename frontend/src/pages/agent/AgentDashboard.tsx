@@ -1,27 +1,82 @@
 import { useState, useEffect } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { agentService, callsService, followUpsService } from '../../services/crm.service';
+import {
+  Chart as ChartJS,
+  ArcElement,
+  CategoryScale,
+  LinearScale,
+  BarElement,
+  Tooltip,
+  Legend,
+} from 'chart.js';
+import { Bar, Doughnut } from 'react-chartjs-2';
+import { agentService, callsService } from '../../services/crm.service';
 import AppLayout from '../../components/layout/AppLayout';
 import { useIsMobile } from '../../hooks/useIsMobile';
 import DateRangeFilter, { computeRange, type DateRangeValue } from '../../components/ui/DateRangeFilter';
 import toast from 'react-hot-toast';
 import {
-  Phone, Coffee, Clock, CheckCircle,
-  RefreshCw, Calendar, AlertCircle, PhoneCall
+  Phone, Coffee, Clock,
+  RefreshCw, AlertCircle, PhoneCall
 } from 'lucide-react';
+
+ChartJS.register(ArcElement, CategoryScale, LinearScale, BarElement, Tooltip, Legend);
+
+const FOLLOW_UP_STATUS_META: Record<string, { label: string; colour: string }> = {
+  uncontacted: { label: 'New Lead', colour: '#6366f1' },
+  contacted: { label: 'Contacted', colour: '#0ea5e9' },
+  lead: { label: 'Interested', colour: '#22c55e' },
+  callback: { label: 'Callback', colour: '#f59e0b' },
+  not_interested: { label: 'Not Interested', colour: '#ef4444' },
+  dnd: { label: 'DND', colour: '#ec4899' },
+  invalid: { label: 'Invalid', colour: '#94a3b8' },
+};
+
+const FOLLOW_UP_STATUS_ORDER = [
+  'uncontacted',
+  'contacted',
+  'lead',
+  'callback',
+  'not_interested',
+  'dnd',
+  'invalid',
+];
+
+const CALL_RESULT_COLOURS = [
+  '#22c55e',
+  '#6366f1',
+  '#f59e0b',
+  '#0ea5e9',
+  '#ef4444',
+  '#14b8a6',
+  '#ec4899',
+  '#94a3b8',
+];
 
 interface Lead {
   id: string; name: string | null; phoneMasked: string; email: string | null;
   status: string; priority: string; isDnd: boolean;
   campaign?: { id: string; name: string; script?: string | null };
 }
-interface FollowUp {
-  id: string; leadId: string; scheduledAt: string; status: string; notes?: string;
-  lead: Lead;
-}
 interface RecentCall {
   id: string; leadId: string; calledAt: string; dispositionTag: string;
   lead: Lead;
+}
+interface ReminderItem {
+  id: string;
+  leadId: string;
+  scheduledAt: string;
+  status: string;
+  notes?: string;
+  lead: Lead;
+}
+interface FollowUpStatusBreakdownItem {
+  status: string;
+  count: number;
+}
+interface TagStatItem {
+  tag: string;
+  count: number;
 }
 
 function formatTalkTime(value?: number | null) {
@@ -135,14 +190,90 @@ export default function AgentWorkspace() {
     },
   });
 
-  const followUpDoneMutation = useMutation({
-    mutationFn: (id: string) => followUpsService.update(id, { status: 'done' }),
-    onSuccess: () => { qc.invalidateQueries({ queryKey: ['agent-dashboard'] }); toast.success('Follow-up done'); },
-  });
-
   const stats = dashData?.data?.data?.stats;
-  const followUps: FollowUp[] = dashData?.data?.data?.followUpsToday || [];
   const recentCalls: RecentCall[] = dashData?.data?.data?.recentCalls || [];
+  const upcomingReminders: ReminderItem[] = dashData?.data?.data?.followUpsToday || [];
+  const tagStats: TagStatItem[] = dashData?.data?.data?.tagStats || [];
+  const followUpStatusBreakdownRaw: FollowUpStatusBreakdownItem[] = dashData?.data?.data?.followUpStatusBreakdown || [];
+  const followUpStatusBreakdown = FOLLOW_UP_STATUS_ORDER
+    .map((status) => {
+      const matchingEntry = followUpStatusBreakdownRaw.find((entry) => entry.status === status);
+      if (!matchingEntry || matchingEntry.count <= 0) return null;
+
+      return {
+        status,
+        label: FOLLOW_UP_STATUS_META[status]?.label || status.replace(/_/g, ' '),
+        count: matchingEntry.count,
+        colour: FOLLOW_UP_STATUS_META[status]?.colour || '#94a3b8',
+      };
+    })
+    .filter((entry): entry is { status: string; label: string; count: number; colour: string } => Boolean(entry));
+  const followUpStatusChartData = {
+    labels: followUpStatusBreakdown.map((entry) => entry.label),
+    datasets: [
+      {
+        data: followUpStatusBreakdown.map((entry) => entry.count),
+        backgroundColor: followUpStatusBreakdown.map((entry) => entry.colour),
+        borderColor: '#ffffff',
+        borderWidth: 4,
+        hoverOffset: 6,
+      },
+    ],
+  };
+  const followUpStatusChartOptions = {
+    responsive: true,
+    maintainAspectRatio: false,
+    cutout: '62%',
+    plugins: {
+      legend: { display: false },
+      tooltip: {
+        callbacks: {
+          label: (context: { label: string; parsed: number }) => `${context.label}: ${context.parsed}`,
+        },
+      },
+    },
+  };
+  const callResultChartData = {
+    labels: tagStats.map((entry) => entry.tag),
+    datasets: [
+      {
+        label: 'Calls',
+        data: tagStats.map((entry) => entry.count),
+        backgroundColor: tagStats.map((_, index) => CALL_RESULT_COLOURS[index % CALL_RESULT_COLOURS.length] + 'cc'),
+        borderColor: tagStats.map((_, index) => CALL_RESULT_COLOURS[index % CALL_RESULT_COLOURS.length]),
+        borderWidth: 1,
+        borderRadius: 10,
+        maxBarThickness: 42,
+      },
+    ],
+  };
+  const callResultChartOptions = {
+    responsive: true,
+    maintainAspectRatio: false,
+    plugins: {
+      legend: { display: false },
+      tooltip: {
+        callbacks: {
+          label: (context: { parsed: { y: number } }) => `Calls: ${context.parsed.y}`,
+        },
+      },
+    },
+    scales: {
+      x: {
+        grid: { display: false },
+        ticks: { color: '#64748b', font: { size: 11 } },
+      },
+      y: {
+        beginAtZero: true,
+        grid: { color: 'rgba(148, 163, 184, 0.16)' },
+        ticks: {
+          precision: 0,
+          color: '#64748b',
+          font: { size: 11 },
+        },
+      },
+    },
+  };
 
   if (isMobile) {
     return (
@@ -163,9 +294,8 @@ export default function AgentWorkspace() {
 
             <div className="agent-mobile-stats-grid">
               {[
-                { label: 'My Leads', value: stats?.totalLeads || 0 },
-                { label: 'Pending', value: stats?.pendingLeads || 0 },
-                { label: rangeLabel === 'Today' ? 'Calls' : `${rangeLabel} Calls`, value: stats?.callsToday || 0 },
+                { label: 'Unique Calls', value: stats?.uniqueCalls || 0 },
+                { label: 'Total Calls', value: stats?.callsToday || 0 },
                 { label: 'Talk Time', value: formatTalkTime(stats?.talkTimeSeconds) },
                 { label: 'Break', value: `${stats?.breakMinutesToday || 0}m` },
               ].map(({ label, value }) => (
@@ -218,33 +348,103 @@ export default function AgentWorkspace() {
           <section className="card card--mobile">
             <div className="card-header card-header--dense">
               <div>
-                <div className="card-kicker">{rangeLabel}</div>
-                <h2 className="card-title">Follow-ups</h2>
+                <div className="card-kicker">Reminder desk</div>
+                <h2 className="card-title">Upcoming Reminder</h2>
               </div>
-              <span className="badge" style={{ background: '#1e293b', color: '#a78bfa' }}>{followUps.length} pending</span>
+              <p style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>{rangeLabel} pending reminders</p>
             </div>
-            {followUps.length === 0 ? (
-              <div className="empty-state"><Calendar size={24} style={{ opacity: 0.4 }} /><p>No follow-ups scheduled</p></div>
+            {upcomingReminders.length === 0 ? (
+              <div className="empty-state"><p>No reminders in this range.</p></div>
             ) : (
               <div className="agent-mobile-list">
-                {followUps.slice(0, 4).map((fu) => {
-                  const isOverdue = new Date(fu.scheduledAt) <= new Date();
+                {upcomingReminders.slice(0, 4).map((reminder) => {
+                  const scheduledAt = new Date(reminder.scheduledAt);
+                  const isOverdue = scheduledAt.getTime() <= Date.now();
+
                   return (
-                    <div key={fu.id} className="agent-mobile-list-row">
+                    <div key={reminder.id} className="agent-mobile-list-row">
                       <div>
-                        <div className="agent-mobile-list-title">{fu.lead.name || 'Unknown'}</div>
-                        <div className="agent-mobile-list-subtitle" style={{ color: isOverdue ? '#ef4444' : 'var(--text-muted)' }}>
-                          {isOverdue ? 'Overdue' : 'Scheduled'} · {new Date(fu.scheduledAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-                        </div>
+                        <div className="agent-mobile-list-title">{reminder.lead.name || 'Unknown'}</div>
+                        <div className="agent-mobile-list-subtitle">{reminder.lead.phoneMasked}</div>
+                        {reminder.notes ? (
+                          <div className="agent-mobile-list-subtitle" style={{ marginTop: 4 }}>{reminder.notes}</div>
+                        ) : null}
                       </div>
-                      <div className="agent-mobile-row-actions">
-                        <button className="btn-icon" onClick={() => followUpDoneMutation.mutate(fu.id)}>
-                          <CheckCircle size={15} style={{ color: '#22c55e' }} />
-                        </button>
+                      <div style={{ textAlign: 'right', flexShrink: 0 }}>
+                        <div style={{ fontSize: '0.8rem', fontWeight: 600, color: isOverdue ? '#ef4444' : 'var(--text-primary)' }}>
+                          {scheduledAt.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                        </div>
+                        <div className="agent-mobile-list-subtitle" style={{ color: isOverdue ? '#ef4444' : 'var(--text-muted)' }}>
+                          {isOverdue ? 'Overdue' : scheduledAt.toLocaleDateString()}
+                        </div>
                       </div>
                     </div>
                   );
                 })}
+              </div>
+            )}
+          </section>
+
+          <section className="card card--mobile">
+            <div className="card-header card-header--dense">
+              <div>
+                <div className="card-kicker">Queue health</div>
+                <h2 className="card-title">Follow-up Status</h2>
+              </div>
+            </div>
+            {followUpStatusBreakdown.length === 0 ? (
+              <div className="empty-state"><p>No follow-up status data yet.</p></div>
+            ) : (
+              <div style={{ display: 'grid', gap: 18 }}>
+                <div style={{ height: 220, padding: '0 8px' }}>
+                  <Doughnut data={followUpStatusChartData} options={followUpStatusChartOptions as never} />
+                </div>
+                <div style={{ display: 'grid', gap: 10 }}>
+                  {followUpStatusBreakdown.map((entry) => (
+                    <div key={entry.status} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12 }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 10, minWidth: 0 }}>
+                        <span style={{ width: 10, height: 10, borderRadius: '50%', background: entry.colour, flexShrink: 0 }} />
+                        <span style={{ fontSize: '0.85rem', color: 'var(--text-primary)' }}>{entry.label}</span>
+                      </div>
+                      <strong style={{ fontSize: '0.9rem', color: 'var(--text-primary)' }}>{entry.count}</strong>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+          </section>
+
+          <section className="card card--mobile">
+            <div className="card-header card-header--dense">
+              <div>
+                <div className="card-kicker">Call outcomes</div>
+                <h2 className="card-title">Call Result</h2>
+              </div>
+            </div>
+            {tagStats.length === 0 ? (
+              <div className="empty-state"><p>No call result data in this range.</p></div>
+            ) : (
+              <div style={{ display: 'grid', gap: 18 }}>
+                <div style={{ height: 240 }}>
+                  <Bar data={callResultChartData} options={callResultChartOptions as never} />
+                </div>
+                <div style={{ display: 'grid', gap: 10 }}>
+                  {tagStats.map((entry, index) => (
+                    <button
+                      key={entry.tag}
+                      type="button"
+                      className="btn btn-secondary"
+                      onClick={() => setSelectedTagForList(entry.tag)}
+                      style={{ justifyContent: 'space-between', paddingInline: 14 }}
+                    >
+                      <span style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                        <span style={{ width: 10, height: 10, borderRadius: '50%', background: CALL_RESULT_COLOURS[index % CALL_RESULT_COLOURS.length], flexShrink: 0 }} />
+                        <span>{entry.tag}</span>
+                      </span>
+                      <strong>{entry.count}</strong>
+                    </button>
+                  ))}
+                </div>
               </div>
             )}
           </section>
@@ -290,12 +490,12 @@ export default function AgentWorkspace() {
               <span className="metric-ribbon__sub">assigned to your queue</span>
             </div>
             <div className="metric-ribbon__item">
-              <span className="metric-ribbon__label">Pending</span>
-              <strong className="metric-ribbon__value">{stats?.pendingLeads || 0}</strong>
+              <span className="metric-ribbon__label">New Leads</span>
+              <strong className="metric-ribbon__value">{stats?.newLeads || 0}</strong>
               <span className="metric-ribbon__sub">not yet contacted</span>
             </div>
             <div className="metric-ribbon__item">
-              <span className="metric-ribbon__label">{rangeLabel} calls</span>
+              <span className="metric-ribbon__label">Total Calls</span>
               <strong className="metric-ribbon__value">{stats?.callsToday || 0}</strong>
               <span className="metric-ribbon__sub">logged in the selected range</span>
             </div>
@@ -309,9 +509,8 @@ export default function AgentWorkspace() {
 
         <div className="stats-grid">
           {[
-            { label: 'My Leads', value: stats?.totalLeads || 0, icon: <Phone size={20} />, colour: '#6366f1' },
-            { label: 'Pending', value: stats?.pendingLeads || 0, icon: <AlertCircle size={20} />, colour: '#f59e0b' },
-            { label: `${rangeLabel} Calls`, value: stats?.callsToday || 0, icon: <PhoneCall size={20} />, colour: '#22c55e' },
+            { label: 'Unique Calls', value: stats?.uniqueCalls || 0, icon: <Phone size={20} />, colour: '#6366f1' },
+            { label: 'Total Calls', value: stats?.callsToday || 0, icon: <PhoneCall size={20} />, colour: '#22c55e' },
             { label: 'Talk Time', value: formatTalkTime(stats?.talkTimeSeconds), icon: <Clock size={20} />, colour: '#14b8a6' },
             { label: 'Break Mins', value: `${stats?.breakMinutesToday || 0}m`, icon: <Clock size={20} />, colour: '#22d3ee' },
           ].map(({ label, value, icon, colour }) => (
@@ -330,54 +529,105 @@ export default function AgentWorkspace() {
             <div className="card">
               <div className="card-header card-header--dense">
                 <div>
-                  <div className="card-kicker">Call feed</div>
-                  <h2 className="card-title">Recent Activity</h2>
+                  <div className="card-kicker">Queue health</div>
+                  <h2 className="card-title">Follow-up Status</h2>
                 </div>
+                <p style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>Current assigned queue mix</p>
               </div>
-              {recentCalls.length === 0 ? (
-                <div className="empty-state"><RefreshCw size={28} style={{ opacity: 0.4 }} /><p>No recent activity</p></div>
+              {followUpStatusBreakdown.length === 0 ? (
+                <div className="empty-state"><p>No follow-up status data yet.</p></div>
               ) : (
-                recentCalls.map((rc) => (
-                  <div key={rc.id} className="followup-row">
-                    <div style={{ flex: 1 }}>
-                      <div style={{ fontWeight: 600, fontSize: '0.875rem', color: 'var(--text-primary)' }}>{rc.lead.name || 'Unknown'}</div>
-                      <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>
-                        {rc.dispositionTag} · {new Date(rc.calledAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-                      </div>
-                    </div>
+                <div className="card-body" style={{ display: 'grid', gridTemplateColumns: 'minmax(220px, 280px) minmax(0, 1fr)', gap: 24, alignItems: 'center' }}>
+                  <div style={{ height: 260 }}>
+                    <Doughnut data={followUpStatusChartData} options={followUpStatusChartOptions as never} />
                   </div>
-                ))
+                  <div style={{ display: 'grid', gap: 12 }}>
+                    {followUpStatusBreakdown.map((entry) => (
+                      <div key={entry.status} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 16, padding: '12px 14px', borderRadius: 16, background: `${entry.colour}14` }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+                          <span style={{ width: 12, height: 12, borderRadius: '50%', background: entry.colour, flexShrink: 0 }} />
+                          <div>
+                            <div style={{ fontSize: '0.9rem', fontWeight: 600, color: 'var(--text-primary)' }}>{entry.label}</div>
+                            <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>Assigned leads in this status</div>
+                          </div>
+                        </div>
+                        <strong style={{ fontSize: '1rem', color: 'var(--text-primary)' }}>{entry.count}</strong>
+                      </div>
+                    ))}
+                  </div>
+                </div>
               )}
             </div>
 
             <div className="card">
               <div className="card-header card-header--dense">
                 <div>
-                  <div className="card-kicker">Callback queue</div>
-                  <h2 className="card-title">{rangeLabel} Follow-ups</h2>
+                  <div className="card-kicker">Call outcomes</div>
+                  <h2 className="card-title">Call Result</h2>
                 </div>
-                <span className="badge" style={{ background: '#1e293b', color: '#a78bfa' }}>
-                  {followUps.length} pending
-                </span>
+                <p style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>Selected range result mix</p>
               </div>
-              {followUps.length === 0 ? (
-                <div className="empty-state"><Calendar size={28} style={{ opacity: 0.4 }} /><p>No follow-ups scheduled</p></div>
+              {tagStats.length === 0 ? (
+                <div className="empty-state"><p>No call result data in this range.</p></div>
               ) : (
-                followUps.map((fu) => {
-                  const isOverdue = new Date(fu.scheduledAt) <= new Date();
+                <div className="card-body" style={{ display: 'grid', gap: 18 }}>
+                  <div style={{ height: 280 }}>
+                    <Bar data={callResultChartData} options={callResultChartOptions as never} />
+                  </div>
+                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: 12 }}>
+                    {tagStats.map((entry, index) => (
+                      <button
+                        key={entry.tag}
+                        type="button"
+                        className="btn btn-secondary"
+                        onClick={() => setSelectedTagForList(entry.tag)}
+                        style={{ justifyContent: 'space-between', paddingInline: 14 }}
+                      >
+                        <span style={{ display: 'flex', alignItems: 'center', gap: 10, minWidth: 0 }}>
+                          <span style={{ width: 10, height: 10, borderRadius: '50%', background: CALL_RESULT_COLOURS[index % CALL_RESULT_COLOURS.length], flexShrink: 0 }} />
+                          <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{entry.tag}</span>
+                        </span>
+                        <strong>{entry.count}</strong>
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </div>
+          </div>
+
+          <div className="dashboard-stack">
+            <div className="card">
+              <div className="card-header card-header--dense">
+                <div>
+                  <div className="card-kicker">Reminder desk</div>
+                  <h2 className="card-title">Upcoming Reminder</h2>
+                </div>
+                <p style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>{rangeLabel} pending reminders</p>
+              </div>
+              {upcomingReminders.length === 0 ? (
+                <div className="empty-state"><p>No reminders in this range.</p></div>
+              ) : (
+                upcomingReminders.slice(0, 6).map((reminder) => {
+                  const scheduledAt = new Date(reminder.scheduledAt);
+                  const isOverdue = scheduledAt.getTime() <= Date.now();
+
                   return (
-                    <div key={fu.id} className="followup-row">
-                      <div style={{ flex: 1 }}>
-                        <div style={{ fontWeight: 600, fontSize: '0.875rem', color: 'var(--text-primary)' }}>{fu.lead.name || 'Unknown'}</div>
-                        <div style={{ fontSize: '0.75rem', color: isOverdue ? '#ef4444' : 'var(--text-muted)' }}>
-                          {isOverdue ? '⚠ Overdue — ' : '⏰ '}
-                          {new Date(fu.scheduledAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-                        </div>
+                    <div key={reminder.id} className="followup-row">
+                      <div style={{ flex: 1, minWidth: 0 }}>
+                        <div style={{ fontWeight: 600, fontSize: '0.875rem', color: 'var(--text-primary)' }}>{reminder.lead.name || 'Unknown'}</div>
+                        <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>{reminder.lead.phoneMasked}</div>
+                        {reminder.notes ? (
+                          <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginTop: 4, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{reminder.notes}</div>
+                        ) : null}
                       </div>
-                      <div style={{ display: 'flex', gap: 4 }}>
-                        <button className="btn-icon" title="Mark done" onClick={() => followUpDoneMutation.mutate(fu.id)}>
-                          <CheckCircle size={15} style={{ color: '#22c55e' }} />
-                        </button>
+                      <div style={{ textAlign: 'right', flexShrink: 0 }}>
+                        <div style={{ fontSize: '0.8rem', fontWeight: 600, color: isOverdue ? '#ef4444' : 'var(--text-primary)' }}>
+                          {scheduledAt.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                        </div>
+                        <div style={{ fontSize: '0.72rem', color: isOverdue ? '#ef4444' : 'var(--text-muted)' }}>
+                          {isOverdue ? 'Overdue' : scheduledAt.toLocaleDateString()}
+                        </div>
                       </div>
                     </div>
                   );
@@ -386,35 +636,6 @@ export default function AgentWorkspace() {
             </div>
           </div>
         </div>
-
-        {/* Range Tag Stats */}
-        {dashData?.data?.data?.tagStats?.length > 0 && (
-          <div className="card">
-            <div className="card-header card-header--dense">
-              <div>
-                <div className="card-kicker">Outcome mix</div>
-                <h2 className="card-title">{rangeLabel} Dispositions</h2>
-              </div>
-              <p style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>Click a row to inspect leads</p>
-            </div>
-            <div className="card-body">
-              {(dashData?.data?.data?.tagStats as { tag: string; count: number }[] || []).map((t) => (
-                <div
-                  key={t.tag}
-                  className="disposition-row clickable-row"
-                  onClick={() => setSelectedTagForList(t.tag)}
-                  style={{ cursor: 'pointer' }}
-                >
-                  <span className="disposition-tag">{t.tag}</span>
-                  <div className="disposition-bar-wrap">
-                    <div className="disposition-bar" style={{ width: `${Math.min(100, (t.count / (stats?.callsToday || 1)) * 100)}%` }} />
-                  </div>
-                  <span className="disposition-count">{t.count}</span>
-                </div>
-              ))}
-            </div>
-          </div>
-        )}
 
         {/* Disposition Detail Modal */}
         {selectedTagForList && (

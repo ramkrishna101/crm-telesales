@@ -1,6 +1,7 @@
 import { Router, Request, Response, NextFunction } from 'express';
 import { z } from 'zod';
 import { prisma } from '../../lib/prisma';
+import { getUserBranchId } from '../../lib/access';
 import { authenticate, requireRole } from '../../middleware/auth';
 import { AppError } from '../../middleware/errorHandler';
 import { io } from '../../index';
@@ -14,17 +15,19 @@ router.use(authenticate);
 router.get('/dashboard', requireRole('agent'), async (req: Request, res: Response, next: NextFunction) => {
   try {
     const agentId = req.user!.userId;
+    const branchId = getUserBranchId(req.user!);
     const query = z.object({
       from: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
       to: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
     }).parse(req.query);
     const rangeStart = query.from ? parseDateAtStartOfDay(query.from) : startOfDay(new Date());
     const rangeEnd = query.to ? parseDateAtEndOfDay(query.to) : endOfDay(new Date());
-    const leadRange = { gte: rangeStart, lte: rangeEnd };
 
     const [
       totalLeads,
-      pendingLeads,
+      uniqueCallsInRange,
+      newLeads,
+      followUpStatusBreakdown,
       callsInRange,
       talkTimeInRange,
       followUpsInRange,
@@ -33,8 +36,24 @@ router.get('/dashboard', requireRole('agent'), async (req: Request, res: Respons
       recentCalls,
       tagStats,
     ] = await Promise.all([
-      prisma.lead.count({ where: { assignedToId: agentId, createdAt: leadRange } }),
-      prisma.lead.count({ where: { assignedToId: agentId, status: { in: ['uncontacted', 'callback'] }, createdAt: leadRange } }),
+      prisma.lead.count({ where: { assignedToId: agentId, branchId, deletedAt: null } }),
+      prisma.callLog.groupBy({
+        by: ['leadId'],
+        where: { agentId, calledAt: { gte: rangeStart, lte: rangeEnd } },
+      }),
+      prisma.lead.count({
+        where: {
+          assignedToId: agentId,
+          branchId,
+          deletedAt: null,
+          status: 'uncontacted',
+        },
+      }),
+      prisma.lead.groupBy({
+        by: ['status'],
+        where: { assignedToId: agentId, branchId, deletedAt: null },
+        _count: { status: true },
+      }),
       prisma.callLog.count({ where: { agentId, calledAt: { gte: rangeStart, lte: rangeEnd } } }),
       prisma.callLog.aggregate({
         where: { agentId, calledAt: { gte: rangeStart, lte: rangeEnd } },
@@ -74,7 +93,8 @@ router.get('/dashboard', requireRole('agent'), async (req: Request, res: Respons
       data: {
         stats: {
           totalLeads,
-          pendingLeads,
+          uniqueCalls: uniqueCallsInRange.length,
+          newLeads,
           callsToday: callsInRange,
           talkTimeSeconds: talkTimeInRange._sum.durationSeconds || 0,
           breakMinutesToday: Math.round(Number((breakTimeInRange[0] as { mins: number })?.mins || 0)),
@@ -83,6 +103,10 @@ router.get('/dashboard', requireRole('agent'), async (req: Request, res: Respons
         },
         followUpsToday: followUpsInRange.map(f => ({ ...f, lead: maskPhone(f.lead) })),
         recentCalls: recentCalls.map(c => ({ ...c, lead: maskPhone(c.lead) })),
+        followUpStatusBreakdown: followUpStatusBreakdown.map((entry) => ({
+          status: entry.status,
+          count: entry._count.status,
+        })),
         tagStats: tagStats.map((t) => ({ tag: t.dispositionTag, count: t._count.dispositionTag })),
       },
     });

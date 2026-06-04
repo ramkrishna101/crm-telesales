@@ -66,7 +66,7 @@ export default function AgentProfilePage() {
               {[
                 { label: 'Calls Today', value: stats?.callsToday || 0 },
                 { label: 'My Leads', value: stats?.totalLeads || 0 },
-                { label: 'Pending', value: stats?.pendingLeads || 0 },
+                { label: 'New Leads', value: stats?.newLeads || 0 },
                 { label: 'Break Time', value: `${stats?.breakMinutesToday || 0}m` },
               ].map(({ label, value }) => (
                 <div key={label} className="agent-mobile-stat-tile">
