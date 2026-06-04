@@ -60,7 +60,7 @@ It should use:
 The design should avoid:
 
 - Overly decorative glass effects that reduce readability
-- Generic generic-card CRM styling that feels too plain
+- Generic CRM card styling that feels too plain
 - Dense multi-tool layouts that compete with the main call actions
 
 ## Interaction Model
