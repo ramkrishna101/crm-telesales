@@ -439,7 +439,9 @@ class StringeeService {
         this.detachRemoteAudio();
         const wasAnswered = !!this.callAnsweredAt;
         const reason = state?.reason || (wasAnswered ? 'AGENT_END_CALL' : 'NO_ANSWER');
-        this.finaliseCall(wasAnswered, reason);
+        if (!this.snapshot.showOutcome) {
+          this.finaliseCall(wasAnswered, reason);
+        }
         this.call = null;
         this.currentCallId = null;
         this.update({ callStatus: 'ended', canMute: false });
@@ -732,6 +734,7 @@ class StringeeService {
   }
 
   hangup = async (): Promise<void> => {
+    const wasAnswered = !!this.callAnsweredAt;
     if (this.call) {
       try {
         this.call.hangup(() => {});
@@ -742,6 +745,9 @@ class StringeeService {
     this.clearTimer();
     this.clearDialingTimeout();
     this.detachRemoteAudio();
+    if (!this.snapshot.showOutcome) {
+      this.finaliseCall(wasAnswered, wasAnswered ? 'AGENT_END_CALL' : 'NO_ANSWER');
+    }
     this.update({ callStatus: 'ended', canMute: false });
   };
 

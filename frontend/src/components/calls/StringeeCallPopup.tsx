@@ -4,8 +4,8 @@ import { stringeeService } from '../../services/stringee.service';
 import { useIsMobile } from '../../hooks/useIsMobile';
 import Dropdown from '../ui/Dropdown';
 
-const POPUP_WIDTH = 360;
-const VIEWPORT_MARGIN = 20;
+const FLOATING_PANEL_WIDTH = 320;
+const FLOATING_PANEL_MARGIN = 20;
 
 function formatDuration(totalSeconds: number) {
   const minutes = Math.floor(totalSeconds / 60);
@@ -29,16 +29,9 @@ function getStatusLabel(state: ReturnType<typeof stringeeService.getSnapshot>) {
 export default function StringeeCallPopup() {
   const state = useSyncExternalStore(stringeeService.subscribe, stringeeService.getSnapshot);
   const isMobile = useIsMobile();
-  const popupRef = useRef<HTMLDivElement>(null);
+  const floatingPanelRef = useRef<HTMLDivElement>(null);
   const dragRef = useRef<{ pointerOffsetX: number; pointerOffsetY: number } | null>(null);
-  const [position, setPosition] = useState<{ x: number; y: number } | null>(null);
-
-  useEffect(() => {
-    if (!state.visible) {
-      setPosition(null);
-      dragRef.current = null;
-    }
-  }, [state.visible]);
+  const [floatingPosition, setFloatingPosition] = useState<{ x: number; y: number } | null>(null);
 
   const busy =
     state.callStatus === 'dialing' ||
@@ -56,53 +49,53 @@ export default function StringeeCallPopup() {
       ? '#ef4444'
       : state.callStatus === 'in_call'
         ? '#22c55e'
-        : busy
-          ? '#f59e0b'
-          : state.connectionStatus === 'connected'
-            ? '#22c55e'
-            : '#94a3b8';
+      : busy
+        ? '#f59e0b'
+        : state.connectionStatus === 'connected'
+          ? '#22c55e'
+          : '#94a3b8';
 
-  const clampPosition = (nextX: number, nextY: number) => {
-    const popupHeight = popupRef.current?.offsetHeight || 0;
-    const maxX = Math.max(VIEWPORT_MARGIN, window.innerWidth - POPUP_WIDTH - VIEWPORT_MARGIN);
-    const maxY = Math.max(VIEWPORT_MARGIN, window.innerHeight - popupHeight - VIEWPORT_MARGIN);
+  useEffect(() => {
+    if (!state.visible || !busy || isMobile) {
+      setFloatingPosition(null);
+      dragRef.current = null;
+    }
+  }, [busy, isMobile, state.visible]);
+
+  const clampFloatingPosition = (nextX: number, nextY: number) => {
+    const panelHeight = floatingPanelRef.current?.offsetHeight || 0;
+    const maxX = Math.max(FLOATING_PANEL_MARGIN, window.innerWidth - FLOATING_PANEL_WIDTH - FLOATING_PANEL_MARGIN);
+    const maxY = Math.max(FLOATING_PANEL_MARGIN, window.innerHeight - panelHeight - FLOATING_PANEL_MARGIN);
 
     return {
-      x: Math.min(Math.max(VIEWPORT_MARGIN, nextX), maxX),
-      y: Math.min(Math.max(VIEWPORT_MARGIN, nextY), maxY),
+      x: Math.min(Math.max(FLOATING_PANEL_MARGIN, nextX), maxX),
+      y: Math.min(Math.max(FLOATING_PANEL_MARGIN, nextY), maxY),
     };
   };
 
-  const handleHeaderPointerDown = (event: React.PointerEvent<HTMLDivElement>) => {
+  const handleFloatingHeaderPointerDown = (event: React.PointerEvent<HTMLDivElement>) => {
     if (event.button !== 0) return;
     if ((event.target as HTMLElement).closest('button')) return;
 
-    const popup = popupRef.current;
-    if (!popup) return;
+    const panel = floatingPanelRef.current;
+    if (!panel) return;
 
-    const rect = popup.getBoundingClientRect();
+    const rect = panel.getBoundingClientRect();
     dragRef.current = {
       pointerOffsetX: event.clientX - rect.left,
       pointerOffsetY: event.clientY - rect.top,
     };
-
-    setPosition({ x: rect.left, y: rect.top });
+    setFloatingPosition({ x: rect.left, y: rect.top });
     event.preventDefault();
   };
 
-  const popupPositionStyle = position
-    ? { top: position.y, left: position.x }
-    : isMobile
-      ? { left: 10, right: 10, bottom: 88 }
-      : { bottom: VIEWPORT_MARGIN, right: VIEWPORT_MARGIN };
-
   useEffect(() => {
-    if (!position) return;
+    if (!floatingPosition) return;
 
     const handlePointerMove = (event: PointerEvent) => {
       const drag = dragRef.current;
       if (!drag) return;
-      setPosition(clampPosition(event.clientX - drag.pointerOffsetX, event.clientY - drag.pointerOffsetY));
+      setFloatingPosition(clampFloatingPosition(event.clientX - drag.pointerOffsetX, event.clientY - drag.pointerOffsetY));
     };
 
     const handlePointerUp = () => {
@@ -115,138 +108,352 @@ export default function StringeeCallPopup() {
       window.removeEventListener('pointermove', handlePointerMove);
       window.removeEventListener('pointerup', handlePointerUp);
     };
-  }, [position]);
+  }, [floatingPosition]);
 
   if (!state.visible) return null;
 
   const hotlineOptions = state.hotlines.map((hotline) => ({ value: hotline, label: `+${hotline}` }));
+  const statusLabel = getStatusLabel(state);
+  const timerLabel = busy ? formatDuration(state.elapsedSeconds) : '--:--';
+  const hotlineLabel = state.selectedHotline ? `+${state.selectedHotline}` : 'No number selected';
+  const surfaceStyle: React.CSSProperties = {
+    minHeight: 52,
+    borderRadius: 16,
+    border: '1px solid #dddfea',
+    background: 'linear-gradient(180deg, #ffffff 0%, #f7f7fb 100%)',
+    boxShadow: 'inset 0 1px 0 rgba(255,255,255,0.9)',
+  };
+
+  const hotlineControl = state.loadingHotlines ? (
+    <div className="agent-mobile-call-widget__selector agent-mobile-call-widget__selector--readonly" style={surfaceStyle}>
+      Loading numbers...
+    </div>
+  ) : state.hotlines.length === 0 ? (
+    <div className="agent-mobile-call-widget__selector agent-mobile-call-widget__selector--readonly" style={surfaceStyle}>
+      No numbers available
+    </div>
+  ) : busy ? (
+    <div className="agent-mobile-call-widget__selector agent-mobile-call-widget__selector--readonly" style={surfaceStyle}>
+      {hotlineLabel}
+    </div>
+  ) : (
+    <div className="agent-mobile-call-widget__dropdown-wrap" style={surfaceStyle}>
+      <Dropdown
+        value={state.selectedHotline || ''}
+        onChange={(value) => stringeeService.setSelectedHotline(value)}
+        options={hotlineOptions}
+        placeholder="Select a number"
+        height={52}
+      />
+    </div>
+  );
+
+  const logButton = state.activeLeadId ? (
+    <button
+      type="button"
+      onClick={() => stringeeService.openOutcomeForActiveLead()}
+      title="Open log"
+      className="agent-mobile-call-widget__log"
+    >
+      Open Log
+    </button>
+  ) : null;
+
+  const floatingPanelStyle: React.CSSProperties = floatingPosition
+    ? { top: floatingPosition.y, left: floatingPosition.x }
+    : { bottom: FLOATING_PANEL_MARGIN, right: FLOATING_PANEL_MARGIN };
 
   if (isMobile) {
     return (
       <div
-        ref={popupRef}
-        className="agent-mobile-call-widget"
+        className="agent-mobile-call-widget-backdrop"
         style={{
           position: 'fixed',
-          left: 10,
-          right: 10,
-          bottom: 88,
+          inset: 0,
           zIndex: 1200,
-          overflow: 'hidden',
+          background: 'linear-gradient(180deg, rgba(91,141,239,0.04) 0%, rgba(24,33,77,0.14) 100%)',
+          display: 'flex',
+          alignItems: 'flex-end',
+          justifyContent: 'center',
+          paddingTop: 80,
         }}
       >
-        <div className="agent-mobile-call-widget__topbar">
-          <div className="agent-mobile-call-widget__topbar-status">
-            <span className="agent-mobile-call-widget__status" style={{ width: 8, height: 8, borderRadius: '50%', background: dotColor }} />
-            <span>{getStatusLabel(state)}</span>
+        <div
+          className="agent-mobile-call-widget"
+          style={{
+            margin: '0 10px',
+            width: '100%',
+            maxHeight: 'calc(100vh - 96px)',
+            borderRadius: '28px 28px 0 0',
+            overflow: 'hidden',
+            border: '1px solid #dddfea',
+            background: 'linear-gradient(180deg, #ffffff 0%, #f7f7fb 100%)',
+            boxShadow: '0 -18px 36px rgba(24, 33, 77, 0.16)',
+            backdropFilter: 'blur(18px)',
+            color: '#1f2430',
+          }}
+        >
+          <div className="agent-mobile-call-widget__topbar">
+            <span className="agent-mobile-call-widget__handle" />
+            <div className="agent-mobile-call-widget__topbar-row">
+              <div className="agent-mobile-call-widget__topbar-status">
+                <span className="agent-mobile-call-widget__status" style={{ background: dotColor }} />
+                <span>{statusLabel}</span>
+              </div>
+              <button
+                type="button"
+                onClick={() => stringeeService.dismiss()}
+                disabled={busy}
+                className="agent-mobile-call-widget__close"
+              >
+                <X size={16} />
+              </button>
+            </div>
           </div>
-          <button
-            onClick={() => stringeeService.dismiss()}
-            disabled={busy}
-            className="agent-mobile-call-widget__close"
-            style={{ opacity: busy ? 0.45 : 1 }}
-          >
-            <X size={14} />
-          </button>
+
+          <div className="agent-mobile-call-widget__panel">
+            <div className="agent-mobile-call-widget__halo" />
+            <div className="agent-mobile-call-widget__hero-card">
+              <div className="agent-mobile-call-widget__avatar">{(state.activeLeadName || 'L').slice(0, 1).toUpperCase()}</div>
+              <div className="agent-mobile-call-widget__eyebrow">{busy ? 'Live Call' : 'Ready To Call'}</div>
+              <div className="agent-mobile-call-widget__lead">{state.activeLeadName || 'Lead'}</div>
+              <div className="agent-mobile-call-widget__phone">{state.activePhone || 'Loading number...'}</div>
+              <div className="agent-mobile-call-widget__timer">{timerLabel}</div>
+            </div>
+
+            <div className="agent-mobile-call-widget__field-group">
+              <div className="agent-mobile-call-widget__field-label">From Number</div>
+              {hotlineControl}
+            </div>
+
+            {state.error && (
+              <div className="agent-mobile-call-widget__error">
+                <span>{state.error}</span>
+                <button
+                  type="button"
+                  onClick={() => stringeeService.clearError()}
+                  className="agent-mobile-call-widget__error-dismiss"
+                >
+                  Dismiss
+                </button>
+              </div>
+            )}
+
+            <div className="agent-mobile-call-widget__actions">
+              {busy ? (
+                <>
+                  <button
+                    type="button"
+                    onClick={() => stringeeService.toggleMute()}
+                    disabled={!state.canMute}
+                    title={state.muted ? 'Unmute' : 'Mute'}
+                    className="agent-mobile-call-widget__button agent-mobile-call-widget__button--muted"
+                    style={{ opacity: state.canMute ? 1 : 0.45 }}
+                  >
+                    <MicOff size={18} />
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => void stringeeService.hangup()}
+                    title="Hang up"
+                    className="agent-mobile-call-widget__button agent-mobile-call-widget__button--danger"
+                  >
+                    <PhoneOff size={22} />
+                  </button>
+                  {logButton}
+                </>
+              ) : (
+                <>
+                  <button
+                    type="button"
+                    onClick={() => void stringeeService.placeCall()}
+                    disabled={!canDial}
+                    title="Call"
+                    className="agent-mobile-call-widget__button agent-mobile-call-widget__button--call"
+                    style={{ opacity: canDial ? 1 : 0.55 }}
+                  >
+                    <Phone size={22} />
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => stringeeService.dismiss()}
+                    title="Cancel"
+                    className="agent-mobile-call-widget__button agent-mobile-call-widget__button--muted"
+                  >
+                    <X size={18} />
+                  </button>
+                  {logButton}
+                </>
+              )}
+            </div>
+          </div>
         </div>
+      </div>
+    );
+  }
 
-        <div className="agent-mobile-call-widget__panel">
-          <div className="agent-mobile-call-widget__hero">
-            <div className="agent-mobile-call-widget__eyebrow">{state.callStatus === 'in_call' ? 'In Call' : getStatusLabel(state)}</div>
-            <div className="agent-mobile-call-widget__lead">{state.activeLeadName || 'Lead'}</div>
-            <div className="agent-mobile-call-widget__phone">{state.activePhone || 'Loading number…'}</div>
-            <div className="agent-mobile-call-widget__timer">
-              {busy ? formatDuration(state.elapsedSeconds) : '00:00'}
+  if (busy) {
+    return (
+      <div
+        style={{
+          position: 'fixed',
+          inset: 0,
+          zIndex: 1200,
+          pointerEvents: 'none',
+        }}
+      >
+        <div
+          ref={floatingPanelRef}
+          style={{
+            position: 'absolute',
+            width: FLOATING_PANEL_WIDTH,
+            borderRadius: 22,
+            border: '1px solid rgba(91,141,239,0.18)',
+            background: 'linear-gradient(180deg, #ffffff 0%, #f7f7fb 100%)',
+            boxShadow: '0 20px 44px rgba(24, 33, 77, 0.16)',
+            backdropFilter: 'blur(14px)',
+            color: '#1f2430',
+            overflow: 'hidden',
+            fontFamily: 'system-ui, -apple-system, sans-serif',
+            pointerEvents: 'auto',
+            ...floatingPanelStyle,
+          }}
+        >
+          <div
+            onPointerDown={handleFloatingHeaderPointerDown}
+            style={{
+              display: 'flex',
+              alignItems: 'flex-start',
+              justifyContent: 'space-between',
+              gap: 12,
+              padding: '14px 14px 10px',
+              cursor: dragRef.current ? 'grabbing' : 'grab',
+              userSelect: 'none',
+              touchAction: 'none',
+              background: 'linear-gradient(180deg, rgba(91,141,239,0.12) 0%, rgba(255,255,255,0) 100%)',
+            }}
+          >
+            <div style={{ display: 'flex', alignItems: 'flex-start', gap: 10, minWidth: 0 }}>
+              <span style={{ width: 9, height: 9, borderRadius: '50%', marginTop: 4, background: dotColor, boxShadow: `0 0 0 6px ${dotColor}22` }} />
+              <div style={{ minWidth: 0 }}>
+                <div style={{ fontSize: 11, fontWeight: 800, letterSpacing: '0.08em', textTransform: 'uppercase', color: '#5b8def' }}>
+                  {statusLabel}
+                </div>
+                <div style={{ fontSize: 12, color: '#7d8394', marginTop: 2 }}>
+                  Drag to keep working in CRM
+                </div>
+              </div>
             </div>
-          </div>
-
-          <div className="agent-mobile-call-widget__field-group">
-            <div className="agent-mobile-call-widget__field-label">From Number</div>
-            {state.loadingHotlines ? (
-              <div className="agent-mobile-call-widget__selector agent-mobile-call-widget__selector--readonly">
-                Loading numbers…
+            <button
+              type="button"
+              onClick={() => stringeeService.openOutcomeForActiveLead()}
+              title="Open log"
+              style={{
+                minWidth: 88,
+                height: 34,
+                padding: '0 14px',
+                borderRadius: 999,
+                border: '1px solid rgba(91,141,239,0.24)',
+                background: '#ffffff',
+                color: '#5b8def',
+                fontSize: 12,
+                fontWeight: 800,
+                    cursor: 'pointer',
+                boxShadow: '0 8px 18px rgba(24, 33, 77, 0.06)',
+              }}
+            >
+              Open Log
+                </button>
               </div>
-            ) : state.hotlines.length === 0 ? (
-              <div className="agent-mobile-call-widget__selector agent-mobile-call-widget__selector--readonly">
-                No numbers available
-              </div>
-            ) : busy ? (
-              <div className="agent-mobile-call-widget__selector agent-mobile-call-widget__selector--readonly">
-                {state.selectedHotline ? `+${state.selectedHotline}` : 'No number selected'}
-              </div>
-            ) : (
-              <Dropdown
-                value={state.selectedHotline || ''}
-                onChange={(value) => stringeeService.setSelectedHotline(value)}
-                options={hotlineOptions}
-                placeholder="Select a number"
-                height={40}
-              />
-            )}
-          </div>
 
-          {state.error && (
-            <div className="agent-mobile-call-widget__error">
-              <span>{state.error}</span>
-              <button
-                onClick={() => stringeeService.clearError()}
-                className="agent-mobile-call-widget__error-dismiss"
-              >
-                Dismiss
-              </button>
-            </div>
-          )}
+              <div style={{ padding: '0 14px 14px' }}>
+                <div style={{ borderRadius: 18, border: '1px solid rgba(91,141,239,0.14)', background: 'linear-gradient(180deg, #ffffff 0%, #f4f7ff 100%)', boxShadow: '0 10px 20px rgba(24, 33, 77, 0.06)', padding: '16px 14px 14px' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+                    <div style={{ width: 54, height: 54, borderRadius: '50%', background: 'linear-gradient(180deg, #5b8def, #4f84e8)', color: '#eff6ff', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 22, fontWeight: 800, boxShadow: '0 12px 24px rgba(91,141,239,0.24)' }}>
+                      {(state.activeLeadName || 'L').slice(0, 1).toUpperCase()}
+                    </div>
+                    <div style={{ minWidth: 0, flex: 1 }}>
+                      <div style={{ fontSize: 18, fontWeight: 800, color: '#1f2430', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                        {state.activeLeadName || 'Lead'}
+                      </div>
+                      <div style={{ marginTop: 2, fontSize: 13, color: '#4f5565', fontFamily: 'ui-monospace, monospace' }}>
+                        {state.activePhone || 'Loading number...'}
+                      </div>
+                    </div>
+                  </div>
 
-          <div className="agent-mobile-call-widget__actions">
-            {busy ? (
-              <>
-                <button
-                  onClick={() => stringeeService.toggleMute()}
-                  disabled={!state.canMute}
-                  title={state.muted ? 'Unmute' : 'Mute'}
-                  className="agent-mobile-call-widget__button agent-mobile-call-widget__button--muted"
-                  style={{ opacity: state.canMute ? 1 : 0.5 }}
-                >
-                  <MicOff size={15} />
-                </button>
-                <button
-                  onClick={() => void stringeeService.hangup()}
-                  title="Hang up"
-                  className="agent-mobile-call-widget__button agent-mobile-call-widget__button--danger"
-                >
-                  <PhoneOff size={16} />
-                </button>
-              </>
-            ) : (
-              <>
-                <button
-                  onClick={() => void stringeeService.placeCall()}
-                  disabled={!canDial}
-                  title="Call"
-                  className="agent-mobile-call-widget__button agent-mobile-call-widget__button--call"
-                  style={{ opacity: canDial ? 1 : 0.55 }}
-                >
-                  <Phone size={16} />
-                </button>
-                <button
-                  onClick={() => stringeeService.dismiss()}
-                  title="Cancel"
-                  className="agent-mobile-call-widget__button agent-mobile-call-widget__button--muted"
-                >
-                  <X size={15} />
-                </button>
-              </>
-            )}
+                  <div style={{ marginTop: 14, display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12 }}>
+                    <div>
+                      <div style={{ fontSize: 10, textTransform: 'uppercase', letterSpacing: '0.1em', color: '#7d8394', fontWeight: 700 }}>
+                        From Number
+                      </div>
+                      <div style={{ marginTop: 4, fontSize: 13, fontWeight: 700, color: '#1f2430' }}>
+                        {hotlineLabel}
+                      </div>
+                    </div>
+                    <div style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center', minWidth: 92, padding: '8px 14px', borderRadius: 999, background: '#ffffff', border: '1px solid rgba(91,141,239,0.18)', boxShadow: '0 8px 18px rgba(24, 33, 77, 0.06)', fontFamily: 'ui-monospace, monospace', fontSize: 20, fontWeight: 800, color: '#1f2430' }}>
+                      {timerLabel}
+                    </div>
+                  </div>
+                </div>
 
-            {state.activeLeadId && (
-              <button
-                onClick={() => stringeeService.openOutcomeForActiveLead()}
-                title="Log call outcome"
-                className="agent-mobile-call-widget__log"
-              >
-                Log
-              </button>
-            )}
+                {state.error && (
+                  <div style={{ marginTop: 12, padding: '10px 12px', borderRadius: 14, border: '1px solid rgba(248,113,113,0.22)', background: '#fff5f5', color: '#b42318', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, fontSize: 12 }}>
+                    <span>{state.error}</span>
+                    <button
+                      type="button"
+                      onClick={() => stringeeService.clearError()}
+                      style={{ border: 'none', background: 'transparent', color: '#b42318', cursor: 'pointer', fontSize: 11, fontWeight: 700 }}
+                    >
+                      Dismiss
+                    </button>
+                  </div>
+                )}
+
+                <div style={{ marginTop: 14, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 14 }}>
+                  <button
+                    type="button"
+                    onClick={() => stringeeService.toggleMute()}
+                    disabled={!state.canMute}
+                    title={state.muted ? 'Unmute' : 'Mute'}
+                    style={{
+                      width: 54,
+                      height: 54,
+                      borderRadius: '50%',
+                      border: '1px solid rgba(91,141,239,0.16)',
+                      background: state.muted ? 'rgba(245,158,11,0.9)' : '#ffffff',
+                      color: state.muted ? '#f8fafc' : '#1f2430',
+                      cursor: state.canMute ? 'pointer' : 'not-allowed',
+                      opacity: state.canMute ? 1 : 0.45,
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      boxShadow: state.muted ? '0 14px 28px rgba(245,158,11,0.22)' : '0 10px 20px rgba(24, 33, 77, 0.06)',
+                    }}
+                  >
+                    <MicOff size={22} />
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => void stringeeService.hangup()}
+                    title="Hang up"
+                    style={{
+                      width: 68,
+                      height: 68,
+                      borderRadius: '50%',
+                      border: 'none',
+                      background: 'linear-gradient(180deg, #ef4444 0%, #dc2626 100%)',
+                      color: '#fff',
+                      cursor: 'pointer',
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      boxShadow: '0 18px 30px rgba(239, 68, 68, 0.24)',
+                    }}
+                  >
+                    <PhoneOff size={24} />
+                  </button>
+                </div>
           </div>
         </div>
       </div>
@@ -255,268 +462,207 @@ export default function StringeeCallPopup() {
 
   return (
     <div
-      ref={popupRef}
-      className={undefined}
       style={{
         position: 'fixed',
-        width: isMobile ? 'auto' : POPUP_WIDTH,
-        background: isMobile ? 'linear-gradient(180deg, #ffffff 0%, #f8fbff 100%)' : '#fff',
-        borderRadius: isMobile ? 24 : 14,
-        boxShadow: isMobile ? '0 20px 40px rgba(24, 33, 77, 0.18)' : '0 20px 60px rgba(0,0,0,0.18)',
+        inset: 0,
         zIndex: 1200,
-        overflow: 'hidden',
-        border: isMobile ? '1px solid rgba(91, 141, 239, 0.16)' : '1px solid #e5e7eb',
-        fontFamily: 'system-ui, -apple-system, sans-serif',
-        ...popupPositionStyle,
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        padding: 24,
+        background: 'radial-gradient(circle at top, rgba(91,141,239,0.14) 0%, rgba(16,26,45,0.26) 56%, rgba(16,26,45,0.38) 100%)',
+        backdropFilter: 'blur(4px)',
+      }}
+      onClick={() => {
+        if (!busy) stringeeService.dismiss();
       }}
     >
-      {/* Header */}
       <div
-        onPointerDown={handleHeaderPointerDown}
-        className={isMobile ? 'agent-mobile-call-widget__header' : undefined}
         style={{
-          display: 'flex',
-          flexDirection: isMobile ? 'column' : 'row',
-          justifyContent: 'space-between',
-          alignItems: isMobile ? 'stretch' : 'center',
-          padding: isMobile ? '10px 14px 8px' : '12px 16px',
-          borderBottom: isMobile ? 'none' : '1px solid #f1f5f9',
-          cursor: isMobile ? 'default' : 'move',
-          userSelect: 'none',
+          width: 'min(392px, calc(100vw - 40px))',
+          maxHeight: 'min(660px, calc(100vh - 56px))',
+          overflow: 'hidden',
+          borderRadius: 26,
+          border: '1px solid #dddfea',
+          background: 'linear-gradient(180deg, #ffffff 0%, #f7f7fb 100%)',
+          boxShadow: '0 22px 56px rgba(24, 33, 77, 0.16)',
+          backdropFilter: 'blur(16px)',
+          color: '#1f2430',
+          position: 'relative',
+          fontFamily: 'system-ui, -apple-system, sans-serif',
         }}
+        onClick={(event) => event.stopPropagation()}
       >
-        {isMobile ? (
-          <>
-            <span className="agent-mobile-call-widget__handle" />
-            <div className="agent-mobile-call-widget__header-row">
-              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                <span className="agent-mobile-call-widget__status" style={{ width: 8, height: 8, borderRadius: '50%', background: dotColor }} />
-                <span style={{ fontSize: 12, fontWeight: 700, color: '#295ebf' }}>{getStatusLabel(state)}</span>
+        <div style={{ position: 'absolute', inset: 0, pointerEvents: 'none' }}>
+          <div style={{ position: 'absolute', top: -74, left: '50%', transform: 'translateX(-50%)', width: 220, height: 220, borderRadius: '50%', background: 'rgba(91,141,239,0.18)', filter: 'blur(36px)' }} />
+          <div style={{ position: 'absolute', inset: 1, borderRadius: 25, border: '1px solid rgba(255,255,255,0.75)' }} />
+        </div>
+
+        <div style={{ position: 'relative', zIndex: 1, padding: '16px 18px 20px' }}>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12 }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 10, minWidth: 0 }}>
+              <span style={{ width: 9, height: 9, borderRadius: '50%', background: dotColor, boxShadow: `0 0 0 6px ${dotColor}22` }} />
+              <div>
+                <div style={{ fontSize: 11, fontWeight: 800, letterSpacing: '0.08em', textTransform: 'uppercase', color: '#5b8def' }}>{statusLabel}</div>
+                <div style={{ fontSize: 12, color: '#7d8394', marginTop: 2 }}>{busy ? 'Live connection active' : 'Call workspace ready'}</div>
               </div>
-              <button
-                onClick={() => stringeeService.dismiss()}
-                disabled={busy}
-                style={{
-                  background: 'transparent', border: 'none',
-                  color: '#94a3b8', cursor: busy ? 'not-allowed' : 'pointer',
-                  padding: 4, borderRadius: 6, opacity: busy ? 0.4 : 1,
-                }}
-              >
-                <X size={18} />
-              </button>
-            </div>
-          </>
-        ) : (
-          <>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-              <span style={{ width: 8, height: 8, borderRadius: '50%', background: dotColor }} />
-              <span style={{ fontSize: 12, fontWeight: 600, color: '#475569' }}>{getStatusLabel(state)}</span>
             </div>
             <button
+              type="button"
               onClick={() => stringeeService.dismiss()}
               disabled={busy}
               style={{
-                background: 'transparent', border: 'none',
-                color: '#94a3b8', cursor: busy ? 'not-allowed' : 'pointer',
-                padding: 4, borderRadius: 6, opacity: busy ? 0.4 : 1,
+                width: 36,
+                height: 36,
+                borderRadius: 12,
+                border: '1px solid #dddfea',
+                background: '#f7f7fb',
+                color: '#4f5565',
+                cursor: busy ? 'not-allowed' : 'pointer',
+                opacity: busy ? 0.42 : 1,
+                display: 'inline-flex',
+                alignItems: 'center',
+                justifyContent: 'center',
               }}
             >
-              <X size={16} />
+              <X size={18} />
             </button>
-          </>
-        )}
-      </div>
+          </div>
 
-      {/* Body */}
-      <div className={isMobile ? 'agent-mobile-call-widget__body' : undefined} style={{ padding: isMobile ? '10px 14px 14px' : '18px 16px', background: isMobile ? 'transparent' : '#f8fafc' }}>
-        <div style={{ textAlign: 'center', marginBottom: 16 }}>
-          <div style={{ fontSize: 11, textTransform: 'uppercase', letterSpacing: '0.06em', color: '#94a3b8', fontWeight: 600 }}>
-            {state.callStatus === 'in_call' ? 'IN CALL' : 'TO'}
-          </div>
-          <div className={isMobile ? 'agent-mobile-call-widget__lead' : undefined} style={{ fontSize: 16, fontWeight: 700, color: '#0f172a', marginTop: 4 }}>
-            {state.activeLeadName || 'Lead'}
-          </div>
-          <div className={isMobile ? 'agent-mobile-call-widget__phone' : undefined} style={{ fontFamily: 'ui-monospace, monospace', fontSize: 14, color: '#475569', marginTop: 2 }}>
-            {state.activePhone || 'Loading number…'}
-          </div>
-          {busy && (
-            <div className={isMobile ? 'agent-mobile-call-widget__timer' : undefined} style={{ fontFamily: 'ui-monospace, monospace', fontSize: 22, fontWeight: 700, color: '#0f172a', marginTop: 10 }}>
-              {formatDuration(state.elapsedSeconds)}
+          <div style={{ marginTop: 16, padding: '22px 18px 18px', borderRadius: 22, background: 'linear-gradient(180deg, #ffffff 0%, #f4f7ff 100%)', border: '1px solid rgba(91,141,239,0.18)', textAlign: 'center', boxShadow: '0 12px 24px rgba(24, 33, 77, 0.06), inset 0 1px 0 rgba(255,255,255,0.9)' }}>
+            <div style={{ width: 74, height: 74, borderRadius: '50%', margin: '0 auto', background: 'linear-gradient(180deg, #5b8def, #4f84e8)', color: '#eff6ff', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 28, fontWeight: 800, boxShadow: '0 14px 28px rgba(91,141,239,0.28)' }}>
+              {(state.activeLeadName || 'L').slice(0, 1).toUpperCase()}
             </div>
-          )}
-        </div>
+            <div style={{ marginTop: 14, fontSize: 11, textTransform: 'uppercase', letterSpacing: '0.12em', color: '#9fc0ff', fontWeight: 800 }}>
+              {busy ? 'Connected Workspace' : 'Outgoing Dialer'}
+            </div>
+            <div style={{ marginTop: 8, fontSize: 24, lineHeight: 1.15, fontWeight: 800, color: '#1f2430' }}>
+              {state.activeLeadName || 'Lead'}
+            </div>
+            <div style={{ marginTop: 6, fontSize: 14, color: '#4f5565', fontFamily: 'ui-monospace, monospace' }}>
+              {state.activePhone || 'Loading number...'}
+            </div>
+            <div style={{ marginTop: 14, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', minWidth: 116, padding: '9px 16px', borderRadius: 999, background: '#ffffff', border: '1px solid rgba(91,141,239,0.18)', boxShadow: '0 8px 18px rgba(24, 33, 77, 0.06)', fontFamily: 'ui-monospace, monospace', fontSize: 24, fontWeight: 800, color: '#1f2430' }}>
+              {timerLabel}
+            </div>
+          </div>
 
-        {!busy && (
-          <div style={{ marginBottom: 12 }}>
-            <div style={{ fontSize: 11, textTransform: 'uppercase', letterSpacing: '0.06em', color: '#64748b', fontWeight: 600, marginBottom: 6 }}>
+          <div style={{ marginTop: 16 }}>
+            <div style={{ marginBottom: 8, fontSize: 11, textTransform: 'uppercase', letterSpacing: '0.1em', color: '#7d8394', fontWeight: 700 }}>
               From Number
             </div>
-            {state.loadingHotlines ? (
-              <div
-                className={isMobile ? 'agent-mobile-call-widget__selector' : undefined}
-                style={{
-                  width: '100%',
-                  height: 40,
-                  padding: '0 12px',
-                  background: '#fff',
-                  border: '1px solid #cbd5e1',
-                  borderRadius: 8,
-                  fontSize: 14,
-                  color: '#94a3b8',
-                  display: 'flex',
-                  alignItems: 'center',
-                  fontFamily: 'ui-monospace, monospace',
-                }}
+            {hotlineControl}
+          </div>
+
+          {state.error && (
+            <div style={{ marginTop: 16, padding: '12px 14px', borderRadius: 16, border: '1px solid rgba(248,113,113,0.32)', background: 'rgba(127,29,29,0.26)', color: '#fecaca', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, fontSize: 13 }}>
+              <span>{state.error}</span>
+              <button
+                type="button"
+                onClick={() => stringeeService.clearError()}
+                style={{ border: 'none', background: 'transparent', color: '#fee2e2', cursor: 'pointer', fontSize: 12, fontWeight: 700 }}
               >
-                Loading numbers…
-              </div>
-            ) : state.hotlines.length === 0 ? (
-              <div
-                className={isMobile ? 'agent-mobile-call-widget__selector' : undefined}
-                style={{
-                  width: '100%',
-                  height: 40,
-                  padding: '0 12px',
-                  background: '#fff',
-                  border: '1px solid #cbd5e1',
-                  borderRadius: 8,
-                  fontSize: 14,
-                  color: '#94a3b8',
-                  display: 'flex',
-                  alignItems: 'center',
-                  fontFamily: 'ui-monospace, monospace',
-                }}
-              >
-                No numbers available
-              </div>
+                Dismiss
+              </button>
+            </div>
+          )}
+
+          <div style={{ marginTop: 18, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 14, flexWrap: 'wrap' }}>
+            {busy ? (
+              <>
+                <button
+                  type="button"
+                  onClick={() => stringeeService.toggleMute()}
+                  disabled={!state.canMute}
+                  title={state.muted ? 'Unmute' : 'Mute'}
+                  style={{
+                    width: 58,
+                    height: 58,
+                    borderRadius: '50%',
+                    border: '1px solid rgba(91,141,239,0.16)',
+                    background: state.muted ? 'rgba(245,158,11,0.9)' : '#ffffff',
+                    color: state.muted ? '#f8fafc' : '#1f2430',
+                    cursor: state.canMute ? 'pointer' : 'not-allowed',
+                    opacity: state.canMute ? 1 : 0.45,
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    boxShadow: state.muted ? '0 14px 28px rgba(245,158,11,0.22)' : '0 10px 20px rgba(24, 33, 77, 0.06)',
+                  }}
+                >
+                  <MicOff size={24} />
+                </button>
+                <button
+                  type="button"
+                  onClick={() => void stringeeService.hangup()}
+                  title="Hang up"
+                  style={{
+                    width: 74,
+                    height: 74,
+                    borderRadius: '50%',
+                    border: 'none',
+                    background: 'linear-gradient(180deg, #ef4444 0%, #dc2626 100%)',
+                    color: '#fff',
+                    cursor: 'pointer',
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    boxShadow: '0 20px 34px rgba(239,68,68,0.3)',
+                  }}
+                >
+                  <PhoneOff size={28} />
+                </button>
+                {logButton}
+              </>
             ) : (
-              <Dropdown
-                value={state.selectedHotline || ''}
-                onChange={(value) => stringeeService.setSelectedHotline(value)}
-                options={state.hotlines.map((hotline) => ({ value: hotline, label: `+${hotline}` }))}
-                placeholder="Select a number"
-                height={40}
-              />
+              <>
+                <button
+                  type="button"
+                  onClick={() => void stringeeService.placeCall()}
+                  disabled={!canDial}
+                  title="Call"
+                  style={{
+                    width: 74,
+                    height: 74,
+                    borderRadius: '50%',
+                    border: 'none',
+                    background: canDial ? 'linear-gradient(180deg, #22c55e 0%, #16a34a 100%)' : 'linear-gradient(180deg, #64748b 0%, #475569 100%)',
+                    color: '#fff',
+                    cursor: canDial ? 'pointer' : 'not-allowed',
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    boxShadow: canDial ? '0 20px 34px rgba(34,197,94,0.26)' : 'none',
+                    opacity: canDial ? 1 : 0.55,
+                  }}
+                >
+                  <Phone size={28} />
+                </button>
+                <button
+                  type="button"
+                  onClick={() => stringeeService.dismiss()}
+                  title="Cancel"
+                  style={{
+                    width: 58,
+                    height: 58,
+                    borderRadius: '50%',
+                    border: '1px solid rgba(91,141,239,0.16)',
+                    background: '#ffffff',
+                    color: '#1f2430',
+                    cursor: 'pointer',
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    boxShadow: '0 10px 20px rgba(24, 33, 77, 0.06)',
+                  }}
+                >
+                  <X size={24} />
+                </button>
+                {logButton}
+              </>
             )}
           </div>
-        )}
-
-        {state.error && (
-          <div
-            className={isMobile ? 'agent-mobile-call-widget__error' : undefined}
-            style={{
-              padding: '8px 12px',
-              background: '#fef2f2',
-              border: '1px solid #fecaca',
-              color: '#991b1b',
-              borderRadius: 8,
-              fontSize: 12,
-              display: 'flex',
-              justifyContent: 'space-between',
-              gap: 8,
-              alignItems: 'center',
-              marginBottom: 10,
-            }}
-          >
-            <span>{state.error}</span>
-            <button
-              onClick={() => stringeeService.clearError()}
-              style={{ background: 'transparent', border: 'none', color: '#991b1b', cursor: 'pointer', fontSize: 11, fontWeight: 600 }}
-            >
-              Dismiss
-            </button>
-          </div>
-        )}
-      </div>
-
-      {/* Action buttons */}
-      <div className={isMobile ? 'agent-mobile-call-widget__actions' : undefined} style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', gap: isMobile ? 10 : 16, padding: isMobile ? '10px 14px 14px' : '16px', background: isMobile ? 'transparent' : '#fff', borderTop: isMobile ? 'none' : '1px solid #f1f5f9', position: 'relative' }}>
-        {busy ? (
-          <>
-            <button
-              onClick={() => stringeeService.toggleMute()}
-              disabled={!state.canMute}
-              title={state.muted ? 'Unmute' : 'Mute'}
-              className={isMobile ? 'agent-mobile-call-widget__button agent-mobile-call-widget__button--muted' : undefined}
-              style={{
-                width: isMobile ? 36 : 48, height: isMobile ? 36 : 48, borderRadius: '50%',
-                background: state.muted ? '#f59e0b' : '#e2e8f0',
-                color: state.muted ? '#fff' : '#475569',
-                border: 'none',
-                cursor: state.canMute ? 'pointer' : 'not-allowed',
-                opacity: state.canMute ? 1 : 0.5,
-                display: 'flex', alignItems: 'center', justifyContent: 'center',
-              }}
-            >
-              <MicOff size={isMobile ? 16 : 20} />
-            </button>
-            <button
-              onClick={() => void stringeeService.hangup()}
-              title="Hang up"
-              className={isMobile ? 'agent-mobile-call-widget__button agent-mobile-call-widget__button--danger' : undefined}
-              style={{
-                width: isMobile ? 36 : 56, height: isMobile ? 36 : 56, borderRadius: '50%',
-                background: '#ef4444', color: '#fff', border: 'none',
-                cursor: 'pointer',
-                display: 'flex', alignItems: 'center', justifyContent: 'center',
-                boxShadow: '0 4px 12px rgba(239,68,68,0.35)',
-              }}
-            >
-              <PhoneOff size={isMobile ? 16 : 22} />
-            </button>
-          </>
-        ) : (
-          <>
-            <button
-              onClick={() => void stringeeService.placeCall()}
-              disabled={!canDial}
-              title="Call"
-              className={isMobile ? 'agent-mobile-call-widget__button agent-mobile-call-widget__button--call' : undefined}
-              style={{
-                width: isMobile ? 42 : 56, height: isMobile ? 42 : 56, borderRadius: '50%',
-                background: canDial ? '#22c55e' : '#94a3b8', color: '#fff', border: 'none',
-                cursor: canDial ? 'pointer' : 'not-allowed',
-                display: 'flex', alignItems: 'center', justifyContent: 'center',
-                boxShadow: canDial ? '0 4px 12px rgba(34,197,94,0.35)' : 'none',
-                transition: 'all 0.2s',
-              }}
-            >
-              <Phone size={isMobile ? 18 : 22} />
-            </button>
-            <button
-              onClick={() => stringeeService.dismiss()}
-              title="Cancel"
-              className={isMobile ? 'agent-mobile-call-widget__button' : undefined}
-              style={{
-                width: isMobile ? 36 : 48, height: isMobile ? 36 : 48, borderRadius: '50%',
-                background: '#e2e8f0', color: '#475569', border: 'none',
-                cursor: 'pointer',
-                display: 'flex', alignItems: 'center', justifyContent: 'center',
-              }}
-            >
-              <X size={isMobile ? 16 : 20} />
-            </button>
-          </>
-        )}
-
-        {/* Small Log button to open the outcome modal manually */}
-        {state.activeLeadId && (
-          <button
-            onClick={() => stringeeService.openOutcomeForActiveLead()}
-            title="Log call outcome"
-            className={isMobile ? 'agent-mobile-call-widget__log' : undefined}
-            style={{
-              position: isMobile ? 'static' : 'absolute', right: 14, top: '50%', transform: isMobile ? 'none' : 'translateY(-50%)',
-              padding: isMobile ? '4px 10px' : '6px 12px', fontSize: isMobile ? 11 : 12, fontWeight: 600,
-              background: '#eff6ff', color: '#1d4ed8',
-              border: '1px solid #bfdbfe', borderRadius: 6,
-              cursor: 'pointer',
-              display: 'inline-flex', alignItems: 'center', gap: 4,
-            }}
-          >
-            Log
-          </button>
-        )}
+        </div>
       </div>
     </div>
   );
