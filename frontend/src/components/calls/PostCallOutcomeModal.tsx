@@ -142,17 +142,30 @@ export default function PostCallOutcomeModal() {
     enabled: visible && !!callIdForCdr,
     refetchInterval: (q) => {
       const c = q.state.data?.data?.data;
-      return c && c.durationSeconds > 0 ? false : 3000;
+      return c && (c.durationSeconds > 0 || c.ringSeconds !== null || !!c.endedAt || !!c.status) ? false : 3000;
     },
     refetchIntervalInBackground: false,
     staleTime: 0,
   });
   const cdr = cdrData?.data?.data || null;
 
-  // Prefer server-side duration when available, otherwise fall back to local
-  const effectiveDuration = cdr?.durationSeconds || state.lastCall?.durationSeconds || 0;
-  const minutes = Math.floor(effectiveDuration / 60);
-  const seconds = effectiveDuration % 60;
+  const cdrTotalDuration = cdr
+    ? Math.max(
+        cdr.durationSeconds || 0,
+        (cdr.durationSeconds || 0) + (cdr.ringSeconds || 0),
+        cdr.startedAt && cdr.endedAt
+          ? Math.max(0, Math.round((new Date(cdr.endedAt).getTime() - new Date(cdr.startedAt).getTime()) / 1000))
+          : 0,
+      )
+    : null;
+
+  // Prefer server-side timing when available. `durationSeconds` stays talk time,
+  // while `totalDurationSeconds` also captures ringing-only attempts.
+  const effectiveDuration = cdr?.durationSeconds ?? state.lastCall?.durationSeconds ?? 0;
+  const effectiveTotalDuration = cdrTotalDuration ?? state.lastCall?.totalDurationSeconds ?? effectiveDuration;
+  const isManualLog = !!state.lastCall?.isManualLog;
+  const minutes = Math.floor(effectiveTotalDuration / 60);
+  const seconds = effectiveTotalDuration % 60;
   const earliestReminder = new Date(Date.now() + 60 * 1000);
   const minReminderDate = formatDateInputValue(earliestReminder);
   const minReminderTime = formatTimeInputValue(earliestReminder);
@@ -173,6 +186,8 @@ export default function PostCallOutcomeModal() {
         leadId: state.lastCall.leadId,
         dispositionTag,
         durationSeconds: effectiveDuration,
+        totalDurationSeconds: effectiveTotalDuration,
+        isManual: isManualLog,
         language: language || undefined,
         notes: notesParts.join(' | ') || undefined,
         telephonyRef: state.lastCall.telephonyRef || undefined,
@@ -259,6 +274,13 @@ export default function PostCallOutcomeModal() {
 
   const outcomeBody = (
     <Grid mobile={isMobile}>
+      {isManualLog ? (
+        <Field label="Manual Call Confirmation" span={2} mobile={isMobile}>
+          <div style={{ padding: '10px 12px', border: '1px solid #fbcfe8', borderRadius: 8, background: '#fff1f2', color: '#9f1239', fontSize: 13, lineHeight: 1.5 }}>
+            This entry was opened through manual log mode and will be saved automatically as a <strong>Manual Log</strong>.
+          </div>
+        </Field>
+      ) : null}
       <Field label="Call Result" required mobile={isMobile}>
         <Dropdown
           value={dispositionTag}

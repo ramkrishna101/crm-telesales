@@ -22,6 +22,8 @@ const logCallSchema = z.object({
   leadId: z.string().uuid(),
   dispositionTag: z.string().min(1),
   durationSeconds: z.number().int().min(0).default(0),
+  totalDurationSeconds: z.number().int().min(0).optional(),
+  isManual: z.boolean().optional().default(false),
   language: z.string().trim().min(1).max(80),
   notes: z.string().max(2000).optional(),
   telephonyRef: z.string().optional(),
@@ -54,6 +56,14 @@ router.post('/', async (req: Request, res: Response, next: NextFunction) => {
     });
     if (!tagExists) throw new AppError(400, 'INVALID_TAG', `Disposition tag "${body.dispositionTag}" does not exist`);
 
+    if (!body.isManual && body.durationSeconds === 0 && !body.telephonyRef) {
+      throw new AppError(
+        400,
+        'MANUAL_CALL_CONFIRMATION_REQUIRED',
+        'Zero-duration logs without a telephony reference are blocked. Use manual log mode for non-Stringee calls.',
+      );
+    }
+
     // Followup status logic:
     //   • If the agent explicitly picks one, honour it.
     //   • Otherwise keep the existing lead.status unless this is the first contact
@@ -77,6 +87,8 @@ router.post('/', async (req: Request, res: Response, next: NextFunction) => {
           agentId,
           dispositionTag: body.dispositionTag,
           durationSeconds: body.durationSeconds,
+          totalDurationSeconds: body.totalDurationSeconds ?? body.durationSeconds,
+          isManual: body.isManual,
           notes: body.notes,
           telephonyRef: body.telephonyRef,
         },
@@ -254,7 +266,7 @@ router.get('/summary', requireRole(...ADMIN_ROLES, 'supervisor'), async (req: Re
       ? Prisma.sql`AND l."phone" LIKE ${`%${trimmedSearch}%`}`
       : Prisma.empty;
 
-    const [tagBreakdown, hourlyHeatmap, dailyTotals, agentLeaderboard] = await Promise.all([
+    const [tagBreakdown, hourlyHeatmap, dailyTotals, agentLeaderboard, agentTalkTimeReport] = await Promise.all([
       // Calls by disposition tag
       prisma.callLog.groupBy({
         by: ['dispositionTag'],
@@ -324,6 +336,80 @@ router.get('/summary', requireRole(...ADMIN_ROLES, 'supervisor'), async (req: Re
         ${rawPhoneClause}
         GROUP BY u.id, u.name ORDER BY calls DESC LIMIT 20
       `,
+
+      prisma.$queryRaw<Array<{
+        agentId: string;
+        name: string;
+        totalCalls: bigint;
+        connectedCalls: bigint;
+        cleanCalls: bigint;
+        uniqueCallCount: bigint;
+        talkSeconds: bigint;
+        totalDurationSeconds: bigint;
+        averageGapSeconds: number | null;
+      }>>`
+        WITH filtered_calls AS (
+          SELECT
+            cl.id,
+            cl."agentId",
+            cl."leadId",
+            cl."calledAt",
+            COALESCE(cl."durationSeconds", 0) as "durationSeconds",
+            COALESCE(cl."totalDurationSeconds", cl."durationSeconds", 0) as "totalDurationSeconds"
+          FROM call_logs cl
+          JOIN leads l ON cl."leadId" = l.id
+          WHERE cl."calledAt" >= ${dateFilter.gte}
+          AND cl."isManual" = false
+          ${rawDateUpperClause}
+          ${rawAgentClause}
+          ${rawDispositionClause}
+          ${rawBranchClause}
+          ${rawCampaignClause}
+          ${rawPhoneClause}
+        ),
+        call_gaps AS (
+          SELECT
+            fc."agentId",
+            EXTRACT(EPOCH FROM (fc."calledAt" - LAG(fc."calledAt") OVER (PARTITION BY fc."agentId" ORDER BY fc."calledAt"))) as gap_seconds
+          FROM filtered_calls fc
+        ),
+        call_summary AS (
+          SELECT
+            fc."agentId",
+            COUNT(fc.id) as "totalCalls",
+            COUNT(CASE WHEN fc."durationSeconds" > 0 THEN 1 END) as "connectedCalls",
+            COUNT(CASE WHEN fc."durationSeconds" > 30 THEN 1 END) as "cleanCalls",
+            COUNT(DISTINCT fc."leadId") as "uniqueCallCount",
+            COALESCE(SUM(CASE WHEN fc."durationSeconds" > 30 THEN fc."durationSeconds" ELSE 0 END), 0) as "talkSeconds",
+            COALESCE(SUM(fc."totalDurationSeconds"), 0) as "totalDurationSeconds"
+          FROM filtered_calls fc
+          GROUP BY fc."agentId"
+        ),
+        gap_summary AS (
+          SELECT
+            cg."agentId",
+            ROUND(AVG(cg.gap_seconds)) as "averageGapSeconds"
+          FROM call_gaps cg
+          WHERE cg.gap_seconds IS NOT NULL
+          GROUP BY cg."agentId"
+        )
+        SELECT
+          u.id as "agentId",
+          u.name,
+          cs."totalCalls",
+          cs."connectedCalls",
+          cs."cleanCalls",
+          cs."uniqueCallCount",
+          cs."talkSeconds",
+          cs."totalDurationSeconds",
+          gs."averageGapSeconds"
+        FROM users u
+        JOIN call_summary cs ON cs."agentId" = u.id
+        LEFT JOIN gap_summary gs ON gs."agentId" = u.id
+        WHERE u."deletedAt" IS NULL
+        ORDER BY cs."talkSeconds" DESC, cs."totalCalls" DESC
+        LIMIT 20
+      `,
     ]);
 
     res.json({
@@ -339,6 +425,17 @@ router.get('/summary', requireRole(...ADMIN_ROLES, 'supervisor'), async (req: Re
           calls: Number(a.calls), connected: Number(a.connected), avgDuration: Number(a.avgDuration),
           interested: Number(a.interested), callback: Number(a.callback), notInterested: Number(a.notInterested),
           rnr: Number(a.rnr), busy: Number(a.busy), dnd: Number(a.dnd), invalid: Number(a.invalid),
+        })),
+        agentTalkTimeReport: agentTalkTimeReport.map((row) => ({
+          agentId: row.agentId,
+          name: row.name,
+          totalCalls: Number(row.totalCalls),
+          connectedCalls: Number(row.connectedCalls),
+          cleanCalls: Number(row.cleanCalls),
+          uniqueCallCount: Number(row.uniqueCallCount),
+          talkSeconds: Number(row.talkSeconds),
+          totalDurationSeconds: Number(row.totalDurationSeconds),
+          averageGapSeconds: Number(row.averageGapSeconds || 0),
         })),
       },
     });

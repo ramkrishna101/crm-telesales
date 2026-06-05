@@ -1,275 +1,185 @@
 import { useState } from 'react';
 import {
   Chart as ChartJS,
+  CategoryScale,
+  LinearScale,
+  BarElement,
+  PointElement,
+  LineElement,
   ArcElement,
   Tooltip,
   Legend,
-  type Plugin,
 } from 'chart.js';
-import { Pie } from 'react-chartjs-2';
+import { Bar, Doughnut } from 'react-chartjs-2';
 import { useQuery } from '@tanstack/react-query';
-import { usersService, campaignsService, leadsService, callsService } from '../../services/crm.service';
+import { Activity, AlertCircle, Clock, FolderOpen, Phone, TrendingUp, UserCheck, Users } from 'lucide-react';
 import AppLayout from '../../components/layout/AppLayout';
 import DateRangeFilter, { computeRange, type DateRangeValue } from '../../components/ui/DateRangeFilter';
 import Dropdown from '../../components/ui/Dropdown';
-import { Users, FolderOpen, Phone, TrendingUp, UserCheck, Clock, AlertCircle, ChevronRight, Languages } from 'lucide-react';
-import { Link } from 'react-router-dom';
+import { adminService, campaignsService } from '../../services/crm.service';
 
-ChartJS.register(ArcElement, Tooltip, Legend);
+ChartJS.register(CategoryScale, LinearScale, BarElement, PointElement, LineElement, ArcElement, Tooltip, Legend);
 
-const LANGUAGE_CHART_COLOURS = [
-  '#5f6bff',
-  '#22c55e',
-  '#f59e0b',
-  '#22d3ee',
-  '#ef4444',
-  '#8b5cf6',
-  '#ec4899',
-  '#14b8a6',
-  '#f97316',
-  '#84cc16',
-];
-
-const languagePercentagePlugin: Plugin<'pie'> = {
-  id: 'languagePercentagePlugin',
-  afterDatasetsDraw(chart) {
-    const dataset = chart.data.datasets[0];
-    const values = (dataset?.data || []).map((value) => Number(value) || 0);
-    const total = values.reduce((sum, value) => sum + value, 0);
-    if (!total) return;
-
-    const { ctx } = chart;
-    const meta = chart.getDatasetMeta(0);
-    const arcs = meta.data as ArcElement[];
-
-    ctx.save();
-    ctx.font = '600 12px Inter, sans-serif';
-    ctx.textAlign = 'center';
-    ctx.textBaseline = 'middle';
-
-    arcs.forEach((arc, index) => {
-      const value = values[index];
-      if (!value) return;
-
-      const percentage = Math.round((value / total) * 100);
-      if (percentage < 8) return;
-
-      const angle = arc.circumference;
-      if (!angle || angle < 0.3) return;
-
-      const radius = arc.innerRadius + (arc.outerRadius - arc.innerRadius) * 0.62;
-      const x = arc.x + Math.cos(arc.startAngle + angle / 2) * radius;
-      const y = arc.y + Math.sin(arc.startAngle + angle / 2) * radius;
-
-      ctx.fillStyle = '#ffffff';
-      ctx.strokeStyle = 'rgba(15, 23, 42, 0.18)';
-      ctx.lineWidth = 3;
-      ctx.strokeText(`${percentage}%`, x, y);
-      ctx.fillText(`${percentage}%`, x, y);
-    });
-
-    ctx.restore();
-  },
+type KpiMetric = { current: number; previous: number; delta: number };
+type FunnelStage = { key: string; label: string; count: number };
+type CallTrendPoint = { date: string; total: number; connected: number; callback: number; busy: number; noAnswer: number; talkMinutes: number };
+type OutcomeItem = { label: string; count: number };
+type AgentItem = { agentId: string; name: string; calls: number; connected: number; connectRate: number; callbacks: number; talkMinutes: number };
+type CampaignItem = { campaignId: string; name: string; leads: number; calls: number; connected: number; connectRate: number };
+type Watchlist = { lowActivityAgents: Array<{ agentId: string; name: string; calls: number }>; staleLeadCount: number; callbackBacklog: number };
+type DashboardSummary = {
+  kpis: {
+    totalLeads: KpiMetric;
+    totalCalls: KpiMetric;
+    connectRate: KpiMetric;
+    activeAgents: KpiMetric;
+    callbacksDue: KpiMetric;
+    activeCampaigns: KpiMetric;
+  };
+  funnel: FunnelStage[];
+  callTrend: CallTrendPoint[];
+  callOutcomes: OutcomeItem[];
+  agentPerformance: AgentItem[];
+  campaignPerformance: CampaignItem[];
+  watchlist: Watchlist;
 };
 
-// ── Stat Card ─────────────────────────────────────────────────────────
+const KPI_COLOURS = ['#0f766e', '#2563eb', '#ca8a04', '#7c3aed', '#ea580c', '#059669'];
+const DONUT_COLOURS = ['#2563eb', '#7c3aed', '#0f766e', '#f97316', '#dc2626', '#0891b2'];
 
-function StatCard({
-  icon, label, value, sub, colour, trend,
-}: {
-  icon: React.ReactNode; label: string; value: string | number;
-  sub?: string; colour: string; trend?: number;
-}) {
+function formatDateLabel(value: string) {
+  return new Date(value).toLocaleDateString('en-IN', { month: 'short', day: 'numeric' });
+}
+
+function DeltaChip({ delta, suffix = '%' }: { delta: number; suffix?: string }) {
+  const positive = delta >= 0;
+  return (
+    <div className={`stat-card__trend ${positive ? 'stat-card__trend--up' : 'stat-card__trend--down'}`}>
+      {positive ? '▲' : '▼'} {positive ? '+' : ''}{delta}{suffix}
+    </div>
+  );
+}
+
+function KpiCard({ label, metric, colour, icon, valueSuffix = '', deltaSuffix = '%' }: { label: string; metric: KpiMetric; colour: string; icon: React.ReactNode; valueSuffix?: string; deltaSuffix?: string }) {
   return (
     <div className="stat-card" style={{ '--card-accent': colour } as React.CSSProperties}>
-      <div className="stat-card__icon" style={{ background: colour + '22', color: colour }}>
-        {icon}
-      </div>
+      <div className="stat-card__icon" style={{ background: `${colour}18`, color: colour }}>{icon}</div>
       <div className="stat-card__body">
-        <div className="stat-card__value">{value}</div>
+        <div className="stat-card__value">{metric.current.toLocaleString()}{valueSuffix}</div>
         <div className="stat-card__label">{label}</div>
-        {sub && <div className="stat-card__sub">{sub}</div>}
+        <div className="stat-card__sub">Previous: {metric.previous.toLocaleString()}{valueSuffix}</div>
       </div>
-      {trend !== undefined && (
-        <div className={`stat-card__trend ${trend >= 0 ? 'stat-card__trend--up' : 'stat-card__trend--down'}`}>
-          {trend >= 0 ? '▲' : '▼'} {Math.abs(trend)}%
-        </div>
-      )}
+      <DeltaChip delta={metric.delta} suffix={deltaSuffix} />
     </div>
   );
 }
 
-// ── Campaign Row ──────────────────────────────────────────────────────
-
-function CampaignRow({ c }: { c: Record<string, unknown> }) {
-  const statusColour: Record<string, string> = {
-    active: '#22c55e', paused: '#f59e0b', closed: '#94a3b8',
-  };
+function EmptyState({ message }: { message: string }) {
   return (
-    <div className="table-row">
-      <div className="table-cell" style={{ flex: 2 }}>
-        <div style={{ fontWeight: 600, color: 'var(--text-primary)' }}>{c.name as string}</div>
-        <div style={{ fontSize: '0.76rem', color: 'var(--text-muted)' }}>{(c.team as Record<string, string> | null)?.name || 'No team'}</div>
-      </div>
-      <div className="table-cell">
-        <span className="badge" style={{ background: statusColour[c.status as string] + '22', color: statusColour[c.status as string] }}>
-          {c.status as string}
-        </span>
-      </div>
-      <div className="table-cell">{(c._count as Record<string, number>)?.leads?.toLocaleString()}</div>
-      <div className="table-cell">
-        <span className="badge" style={{ background: c.priority === 'high' ? '#fff0f0' : '#f3f4f8', color: c.priority === 'high' ? '#dc2626' : '#6b7280' }}>
-          {c.priority as string}
-        </span>
-      </div>
-      <div className="table-cell">
-        <Link to={`/admin/campaigns/${c.id as string}`} className="btn-icon">
-          <ChevronRight size={16} />
-        </Link>
-      </div>
+    <div className="empty-state">
+      <AlertCircle size={28} />
+      <p>{message}</p>
     </div>
   );
 }
-
-// ── Agent Row ─────────────────────────────────────────────────────────
-
-function AgentRow({ u }: { u: Record<string, unknown> }) {
-  const statusColour = u.status === 'active' ? '#22c55e' : '#94a3b8';
-  return (
-    <div className="table-row">
-      <div className="table-cell" style={{ flex: 2, display: 'flex', gap: 10, alignItems: 'center' }}>
-        <div className="avatar avatar--sm">{(u.name as string).charAt(0)}</div>
-        <div>
-          <div style={{ fontWeight: 500 }}>{u.name as string}</div>
-          <div style={{ fontSize: '0.76rem', color: 'var(--text-muted)' }}>{u.email as string}</div>
-        </div>
-      </div>
-      <div className="table-cell">
-        <span className="badge" style={{ background: statusColour + '22', color: statusColour }}>
-          {u.status as string}
-        </span>
-      </div>
-      <div className="table-cell" style={{ color: 'var(--text-secondary)' }}>
-        {(u.team as Record<string, string> | null)?.name || '—'}
-      </div>
-    </div>
-  );
-}
-
-// ── Admin Dashboard ───────────────────────────────────────────────────
 
 export default function AdminDashboard() {
-  // Date range filter — defaults to today for the shared dashboard behaviour.
   const [dateRange, setDateRange] = useState<DateRangeValue>(() => {
-    const r = computeRange('today');
-    return { preset: 'today', from: r.from, to: r.to };
+    const range = computeRange('today');
+    return { preset: 'today', from: range.from, to: range.to };
   });
   const [campaignFilter, setCampaignFilter] = useState('');
-  const dateParams = { from: dateRange.from, to: dateRange.to };
-  const dashboardParams = {
-    ...dateParams,
+
+  const params = {
+    from: dateRange.from,
+    to: dateRange.to,
     ...(campaignFilter ? { campaignId: campaignFilter } : {}),
   };
-  const rangeLabel =
-    dateRange.preset === 'today' ? 'Today' :
-    dateRange.preset === 'yesterday' ? 'Yesterday' :
-    dateRange.preset === 'this_month' ? 'This month' :
-    dateRange.preset === 'last_7_days' ? 'Last 7 days' :
-    `${dateRange.from} → ${dateRange.to}`;
-
-  const { data: usersData } = useQuery({
-    queryKey: ['users', 'all'],
-    queryFn: () => usersService.list({ limit: 100 }),
-  });
 
   const { data: campaignsData } = useQuery({
-    queryKey: ['campaigns', 'all'],
+    queryKey: ['campaigns', 'admin-dashboard-filter'],
     queryFn: () => campaignsService.list({ limit: 100 }),
   });
 
-  const { data: leadsData } = useQuery({
-    queryKey: ['leads', 'dashboard', dateRange.from, dateRange.to, campaignFilter],
-    queryFn: () => leadsService.list({ limit: 1, ...dashboardParams }),
+  const { data: dashboardData } = useQuery({
+    queryKey: ['admin-dashboard-summary', dateRange.from, dateRange.to, campaignFilter],
+    queryFn: () => adminService.dashboard(params),
   });
 
-  const totalLeads = (leadsData?.data?.data?.total as number) || 0;
+  const campaigns = (campaignsData?.data?.data?.campaigns || []) as Array<{ id: string; name: string }>;
+  const selectedCampaign = campaigns.find((campaign) => campaign.id === campaignFilter) || null;
+  const summary = dashboardData?.data?.data as DashboardSummary | undefined;
 
-  const { data: languageLeadsData } = useQuery({
-    queryKey: ['leads', 'dashboard', 'languages', dateRange.from, dateRange.to, campaignFilter, totalLeads],
-    queryFn: () => leadsService.list({ limit: Math.max(totalLeads, 1), ...dashboardParams }),
-    enabled: totalLeads > 0,
-  });
-
-  const { data: callsSummary } = useQuery({
-    queryKey: ['calls', 'summary', dateRange.from, dateRange.to, campaignFilter],
-    queryFn: () => callsService.summary(dashboardParams),
-  });
-
-  const users = (usersData?.data?.data?.users || []) as Record<string, unknown>[];
-  const campaigns = (campaignsData?.data?.data?.campaigns || []) as Record<string, unknown>[];
-  const selectedCampaign = campaigns.find((c) => (c.id as string) === campaignFilter) || null;
-  const campaignScope = selectedCampaign ? [selectedCampaign] : campaigns;
-  const callData = callsSummary?.data?.data;
-  const languageLeads = (languageLeadsData?.data?.data?.leads || []) as Array<{ lastCallLanguage?: string | null }>;
-  const agents = users.filter((u) => u.role === 'agent');
-  const activeCampaigns = campaignScope.filter((c) => c.status === 'active').length;
-  const totalCalls = callData?.dailyTotals?.reduce((s: number, d: { count: number }) => s + d.count, 0) || 0;
-  const connectedCalls = callData?.agentLeaderboard?.reduce((sum: number, agent: { connected: number }) => sum + agent.connected, 0) || 0;
-  const callbackCount = callData?.tagBreakdown?.find((tag: { tag: string }) => tag.tag === 'Callback')?.count || 0;
-  const connectRate = totalCalls ? Math.round((connectedCalls / totalCalls) * 100) : 0;
-  const scopeLabel = selectedCampaign ? `${selectedCampaign.name as string} in ${rangeLabel.toLowerCase()}` : rangeLabel.toLowerCase();
-  const languageCounts = languageLeads.reduce((totals: Record<string, number>, lead) => {
-    const language = lead.lastCallLanguage?.trim();
-    if (!language) return totals;
-    totals[language] = (totals[language] || 0) + 1;
-    return totals;
-  }, {});
-  const languageBreakdown = Object.entries(languageCounts)
-    .map(([language, count]) => ({ language, count }))
-    .sort((left, right) => right.count - left.count);
-  const totalLanguageTaggedLeads = languageBreakdown.reduce((sum, entry) => sum + entry.count, 0);
-  const languageChartData = {
-    labels: languageBreakdown.map((entry) => entry.language),
+  const trendData = {
+    labels: summary?.callTrend.map((point) => formatDateLabel(point.date)) || [],
     datasets: [
       {
-        data: languageBreakdown.map((entry) => entry.count),
-        backgroundColor: languageBreakdown.map((_, index) => LANGUAGE_CHART_COLOURS[index % LANGUAGE_CHART_COLOURS.length]),
-        borderColor: '#ffffff',
-        borderWidth: 2,
+        label: 'Total calls',
+        data: summary?.callTrend.map((point) => point.total) || [],
+        backgroundColor: 'rgba(37, 99, 235, 0.72)',
+        borderRadius: 8,
+      },
+      {
+        label: 'Connected',
+        data: summary?.callTrend.map((point) => point.connected) || [],
+        backgroundColor: 'rgba(15, 118, 110, 0.78)',
+        borderRadius: 8,
+      },
+      {
+        label: 'Callbacks',
+        data: summary?.callTrend.map((point) => point.callback) || [],
+        backgroundColor: 'rgba(249, 115, 22, 0.78)',
+        borderRadius: 8,
       },
     ],
   };
-  const languageChartOptions = {
+  const funnelMax = Math.max(...(summary?.funnel.map((item) => item.count) || [1]));
+  const outcomeData = {
+    labels: summary?.callOutcomes.map((item) => item.label) || [],
+    datasets: [{ data: summary?.callOutcomes.map((item) => item.count) || [], backgroundColor: DONUT_COLOURS, borderColor: '#fff', borderWidth: 2 }],
+  };
+  const agentBarData = {
+    labels: summary?.agentPerformance.map((item) => item.name) || [],
+    datasets: [
+      { label: 'Calls', data: summary?.agentPerformance.map((item) => item.calls) || [], backgroundColor: '#7c3aed', borderRadius: 8 },
+      { label: 'Connected', data: summary?.agentPerformance.map((item) => item.connected) || [], backgroundColor: '#0f766e', borderRadius: 8 },
+    ],
+  };
+  const campaignBarData = {
+    labels: summary?.campaignPerformance.map((item) => item.name) || [],
+    datasets: [{ label: 'Connect rate %', data: summary?.campaignPerformance.map((item) => item.connectRate) || [], backgroundColor: '#2563eb', borderRadius: 8 }],
+  };
+  const chartOptions = {
     responsive: true,
     maintainAspectRatio: false,
     plugins: {
-      legend: { display: false },
+      legend: { labels: { color: '#64748b', font: { family: 'Inter', size: 12 } } },
       tooltip: {
-        backgroundColor: '#1e293b',
-        borderColor: '#334155',
+        backgroundColor: '#0f172a',
+        borderColor: '#1e293b',
         borderWidth: 1,
         titleColor: '#f8fafc',
         bodyColor: '#cbd5e1',
-        callbacks: {
-          label: (context: { label: string; parsed: number }) => {
-            const percentage = totalLanguageTaggedLeads
-              ? Math.round((context.parsed / totalLanguageTaggedLeads) * 100)
-              : 0;
-            return `${context.label}: ${context.parsed} (${percentage}%)`;
-          },
-        },
       },
     },
+    scales: {
+      x: { grid: { color: '#e2e8f0' }, ticks: { color: '#64748b' } },
+      y: { grid: { color: '#e2e8f0' }, ticks: { color: '#64748b' } },
+    },
   };
+  const outcomeLegendItems = (summary?.callOutcomes || []).map((item, index) => ({
+    ...item,
+    colour: DONUT_COLOURS[index % DONUT_COLOURS.length],
+  }));
 
   return (
     <AppLayout>
       <div className="page-container">
         <section className="dashboard-hero">
           <div>
-            <p className="section-eyebrow">Operations overview</p>
+            <p className="section-eyebrow">Control center</p>
             <h1 className="page-title">Admin Dashboard</h1>
-            <p className="page-subtitle">Platform-wide throughput across users, campaigns, leads, and call outcomes.</p>
+            <p className="page-subtitle">Track funnel health, call throughput, agent execution, campaign performance, and operational risk in one place.</p>
           </div>
 
           <div className="page-actions">
@@ -282,250 +192,193 @@ export default function AdminDashboard() {
                 height={38}
                 options={[
                   { value: '', label: 'All Campaigns' },
-                  ...campaigns.map((campaign) => ({
-                    value: campaign.id as string,
-                    label: campaign.name as string,
-                  })),
+                  ...campaigns.map((campaign) => ({ value: campaign.id, label: campaign.name })),
                 ]}
               />
             </div>
-            <div className="ops-pill">
-              {selectedCampaign ? `${selectedCampaign.name as string}` : `${activeCampaigns} live campaigns`}
-            </div>
-            <Link to="/admin/campaigns" className="btn btn-primary">
-              + New Campaign
-            </Link>
-          </div>
-
-          <div className="metric-ribbon">
-            <div className="metric-ribbon__item">
-              <span className="metric-ribbon__label">Active agents</span>
-              <strong className="metric-ribbon__value">{agents.filter((u) => u.status === 'active').length}</strong>
-              <span className="metric-ribbon__sub">currently dialing or available</span>
-            </div>
-            <div className="metric-ribbon__item">
-              <span className="metric-ribbon__label">{rangeLabel} connect rate</span>
-              <strong className="metric-ribbon__value">{connectRate}%</strong>
-              <span className="metric-ribbon__sub">connected vs total calls</span>
-            </div>
-            <div className="metric-ribbon__item">
-              <span className="metric-ribbon__label">Callbacks requested</span>
-              <strong className="metric-ribbon__value">{callbackCount}</strong>
-              <span className="metric-ribbon__sub">follow-up pressure to watch</span>
-            </div>
-            <div className="metric-ribbon__item">
-              <span className="metric-ribbon__label">Lead inventory</span>
-              <strong className="metric-ribbon__value">{totalLeads.toLocaleString()}</strong>
-              <span className="metric-ribbon__sub">created in {scopeLabel}</span>
-            </div>
+            <div className="ops-pill">{selectedCampaign ? selectedCampaign.name : 'All campaigns'}</div>
           </div>
         </section>
 
-        <div className="stats-grid">
-          <StatCard
-            icon={<Users size={22} />} label="Total Users"
-            value={users.length} sub={`${agents.length} active agents`}
-            colour="#6366f1" trend={12}
-          />
-          <StatCard
-            icon={<FolderOpen size={22} />} label="Campaigns"
-            value={selectedCampaign ? 1 : campaigns.length} sub={selectedCampaign ? 'selected campaign' : `${activeCampaigns} active`}
-            colour="#22d3ee"
-          />
-          <StatCard
-            icon={<UserCheck size={22} />} label="New Leads"
-            value={totalLeads.toLocaleString()} sub={`created in ${scopeLabel}`}
-            colour="#22c55e" trend={8}
-          />
-          <StatCard
-            icon={<Phone size={22} />} label={`Calls (${rangeLabel.toLowerCase()})`}
-            value={totalCalls.toLocaleString()} sub={selectedCampaign ? 'total calls for selected campaign' : 'total connected'}
-            colour="#f59e0b"
-          />
-        </div>
+        {summary ? (
+          <>
+            <div className="stats-grid">
+              <KpiCard label="Total Leads" metric={summary.kpis.totalLeads} colour={KPI_COLOURS[0]} icon={<Users size={20} />} />
+              <KpiCard label="Total Calls" metric={summary.kpis.totalCalls} colour={KPI_COLOURS[1]} icon={<Phone size={20} />} />
+              <KpiCard label="Connect Rate" metric={summary.kpis.connectRate} colour={KPI_COLOURS[2]} icon={<TrendingUp size={20} />} valueSuffix="%" deltaSuffix="pp" />
+              <KpiCard label="Active Agents" metric={summary.kpis.activeAgents} colour={KPI_COLOURS[3]} icon={<UserCheck size={20} />} />
+              <KpiCard label="Callbacks Due" metric={summary.kpis.callbacksDue} colour={KPI_COLOURS[4]} icon={<Clock size={20} />} />
+              <KpiCard label="Active Campaigns" metric={summary.kpis.activeCampaigns} colour={KPI_COLOURS[5]} icon={<FolderOpen size={20} />} />
+            </div>
 
-        <div className="dashboard-grid">
-          <div className="dashboard-stack">
-            <div className="card">
-              <div className="card-header card-header--dense">
-                <div>
-                  <div className="card-kicker">Call health</div>
-                  <h2 className="card-title">Disposition Breakdown</h2>
+            <div className="dashboard-grid" style={{ alignItems: 'start' }}>
+              <div className="dashboard-stack">
+                <div className="card">
+                  <div className="card-header card-header--dense">
+                    <div>
+                      <div className="card-kicker">Status overview</div>
+                      <h2 className="card-title">Follow-up Status</h2>
+                    </div>
+                  </div>
+                  <div className="card-body" style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+                    {summary.funnel.map((stage) => (
+                      <div key={stage.key} style={{ display: 'grid', gridTemplateColumns: '140px minmax(0, 1fr) 60px', gap: 12, alignItems: 'center' }}>
+                        <div style={{ fontWeight: 600, color: 'var(--text-secondary)' }}>{stage.label}</div>
+                        <div style={{ height: 12, borderRadius: 999, background: '#e2e8f0', overflow: 'hidden' }}>
+                          <div style={{ width: `${funnelMax ? (stage.count / funnelMax) * 100 : 0}%`, height: '100%', background: 'linear-gradient(90deg, #2563eb 0%, #7c3aed 100%)' }} />
+                        </div>
+                        <div style={{ textAlign: 'right', fontWeight: 700, color: 'var(--text-primary)' }}>{stage.count.toLocaleString()}</div>
+                      </div>
+                    ))}
+                  </div>
                 </div>
-                <span className="card-subtitle">{rangeLabel}</span>
+
+                <div className="card">
+                  <div className="card-header card-header--dense">
+                    <div>
+                      <div className="card-kicker">Call pulse</div>
+                      <h2 className="card-title">Call Performance Trend</h2>
+                    </div>
+                  </div>
+                  <div style={{ padding: 20, height: 320 }}>
+                    {summary.callTrend.length ? <Bar data={trendData} options={chartOptions as never} /> : <EmptyState message="No calls in this range" />}
+                  </div>
+                </div>
+
+                <div className="card">
+                  <div className="card-header card-header--dense">
+                    <div>
+                      <div className="card-kicker">Team ranking</div>
+                      <h2 className="card-title">Agent Performance</h2>
+                    </div>
+                  </div>
+                  <div style={{ padding: 20, height: 320 }}>
+                    {summary.agentPerformance.length ? <Bar data={agentBarData} options={{ ...chartOptions, indexAxis: 'y' } as never} /> : <EmptyState message="No agent activity yet" />}
+                  </div>
+                  <div className="card-body" style={{ paddingTop: 0, display: 'grid', gap: 10 }}>
+                    {summary.agentPerformance.slice(0, 5).map((agent) => (
+                      <div key={agent.agentId} style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) 78px 78px 84px', gap: 12, alignItems: 'center', padding: '10px 0', borderTop: '1px solid var(--border)' }}>
+                        <div>
+                          <div style={{ fontWeight: 600, color: 'var(--text-primary)' }}>{agent.name}</div>
+                          <div style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>{agent.talkMinutes} talk mins</div>
+                        </div>
+                        <div style={{ textAlign: 'right' }}>{agent.calls}</div>
+                        <div style={{ textAlign: 'right' }}>{agent.connected}</div>
+                        <div style={{ textAlign: 'right', fontWeight: 700 }}>{agent.connectRate}%</div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
               </div>
-              <div className="card-body">
-                {callData?.tagBreakdown?.length ? (
-                  callData.tagBreakdown.map((t: { tag: string; count: number }) => (
-                    <div key={t.tag} className="disposition-row">
-                      <span className="disposition-tag">{t.tag}</span>
-                      <div className="disposition-bar-wrap">
-                        <div
-                          className="disposition-bar"
-                          style={{ width: `${Math.min(100, (t.count / (totalCalls || 1)) * 100)}%` }}
+
+              <div className="dashboard-stack">
+                <div className="card">
+                  <div className="card-header card-header--dense">
+                    <div>
+                      <div className="card-kicker">Mix</div>
+                      <h2 className="card-title">Call Outcome Breakdown</h2>
+                    </div>
+                  </div>
+                  {summary.callOutcomes.length ? (
+                    <div className="card-body" style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1.2fr) minmax(220px, 0.8fr)', gap: 20, alignItems: 'center' }}>
+                      <div style={{ height: 280 }}>
+                        <Doughnut
+                          data={outcomeData}
+                          options={{
+                            ...chartOptions,
+                            scales: undefined,
+                            plugins: {
+                              ...chartOptions.plugins,
+                              legend: { display: false },
+                            },
+                          } as never}
                         />
                       </div>
-                      <span className="disposition-count">{t.count}</span>
+                      <div style={{ display: 'grid', gap: 10 }}>
+                        {outcomeLegendItems.map((item) => (
+                          <div key={item.label} style={{ display: 'grid', gridTemplateColumns: '12px minmax(0, 1fr) auto', gap: 12, alignItems: 'center' }}>
+                            <div style={{ width: 12, height: 12, borderRadius: 999, background: item.colour }} />
+                            <div style={{ color: 'var(--text-secondary)', fontWeight: 600 }}>{item.label}</div>
+                            <div style={{ color: 'var(--text-primary)', fontWeight: 700 }}>{item.count.toLocaleString()}</div>
+                          </div>
+                        ))}
+                      </div>
                     </div>
-                  ))
-                ) : (
-                  <div className="empty-state">
-                    <AlertCircle size={32} />
-                    <p>No calls logged yet</p>
-                  </div>
-                )}
-              </div>
-            </div>
-
-            <div className="card">
-              <div className="card-header card-header--dense">
-                <div>
-                  <div className="card-kicker">Language mix</div>
-                  <h2 className="card-title">Language Breakdown</h2>
+                  ) : (
+                    <div style={{ padding: 20, height: 320 }}>
+                      <EmptyState message="No call outcomes available" />
+                    </div>
+                  )}
                 </div>
-                <span className="card-subtitle">{rangeLabel}</span>
-              </div>
-              <div className="card-body">
-                {languageBreakdown.length ? (
-                  <div
-                    style={{
-                      display: 'grid',
-                      gridTemplateColumns: 'minmax(180px, 240px) minmax(0, 1fr)',
-                      gap: 20,
-                      alignItems: 'center',
-                    }}
-                  >
-                    <div style={{ height: 220, position: 'relative' }}>
-                      <Pie data={languageChartData} options={languageChartOptions as never} plugins={[languagePercentagePlugin]} />
+
+                <div className="card">
+                  <div className="card-header card-header--dense">
+                    <div>
+                      <div className="card-kicker">Campaigns</div>
+                      <h2 className="card-title">Campaign Performance</h2>
                     </div>
-                    <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-                      {languageBreakdown.map((entry, index) => (
-                        <div
-                          key={entry.language}
-                          style={{
-                            display: 'flex',
-                            alignItems: 'center',
-                            justifyContent: 'space-between',
-                            gap: 12,
-                            padding: '10px 12px',
-                            border: '1px solid var(--border)',
-                            borderRadius: 12,
-                            background: 'var(--bg-elevated)',
-                          }}
-                        >
-                          <span style={{ display: 'flex', alignItems: 'center', gap: 10, minWidth: 0 }}>
-                            <span
-                              style={{
-                                width: 10,
-                                height: 10,
-                                borderRadius: '50%',
-                                background: LANGUAGE_CHART_COLOURS[index % LANGUAGE_CHART_COLOURS.length],
-                                flexShrink: 0,
-                              }}
-                            />
-                            <span style={{ color: 'var(--text-primary)', fontSize: '1rem', fontWeight: 500, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                              {entry.language}
-                            </span>
-                          </span>
-                          <span style={{ display: 'flex', alignItems: 'baseline', gap: 8, color: 'var(--text-secondary)', flexShrink: 0 }}>
-                            <span style={{ fontSize: '0.98rem', fontWeight: 700 }}>{entry.count}</span>
-                            <span style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>
-                              {Math.round((entry.count / totalLanguageTaggedLeads) * 100)}%
-                            </span>
-                          </span>
+                  </div>
+                  <div style={{ padding: 20, height: 320 }}>
+                    {summary.campaignPerformance.length ? <Bar data={campaignBarData} options={{ ...chartOptions, indexAxis: 'y' } as never} /> : <EmptyState message="No campaign activity in this range" />}
+                  </div>
+                  <div className="card-body" style={{ paddingTop: 0, display: 'grid', gap: 10 }}>
+                    {summary.campaignPerformance.slice(0, 5).map((campaign) => (
+                      <div key={campaign.campaignId} style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) 64px 64px 82px', gap: 12, alignItems: 'center', padding: '10px 0', borderTop: '1px solid var(--border)' }}>
+                        <div>
+                          <div style={{ fontWeight: 600, color: 'var(--text-primary)' }}>{campaign.name}</div>
+                          <div style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>{campaign.leads} leads</div>
                         </div>
-                      ))}
+                        <div style={{ textAlign: 'right' }}>{campaign.calls}</div>
+                        <div style={{ textAlign: 'right' }}>{campaign.connected}</div>
+                        <div style={{ textAlign: 'right', fontWeight: 700 }}>{campaign.connectRate}%</div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+
+                <div className="card">
+                  <div className="card-header card-header--dense">
+                    <div>
+                      <div className="card-kicker">Action signals</div>
+                      <h2 className="card-title">Watchlist</h2>
                     </div>
                   </div>
-                ) : (
-                  <div className="empty-state">
-                    <Languages size={32} />
-                    <p>No language data available</p>
+                  <div className="card-body signal-list">
+                    <div className="signal-row">
+                      <div className="signal-row__icon signal-row__icon--amber"><Clock size={16} /></div>
+                      <div className="signal-row__body">
+                        <div className="signal-row__label">Callback backlog</div>
+                        <div className="signal-row__value">{summary.watchlist.callbackBacklog} pending callbacks in the selected range.</div>
+                      </div>
+                    </div>
+                    <div className="signal-row">
+                      <div className="signal-row__icon signal-row__icon--red"><AlertCircle size={16} /></div>
+                      <div className="signal-row__body">
+                        <div className="signal-row__label">Stale leads</div>
+                        <div className="signal-row__value">{summary.watchlist.staleLeadCount} uncontacted leads are older than 48 hours.</div>
+                      </div>
+                    </div>
+                    <div className="signal-row">
+                      <div className="signal-row__icon signal-row__icon--blue"><Activity size={16} /></div>
+                      <div className="signal-row__body">
+                        <div className="signal-row__label">Low activity agents</div>
+                        <div className="signal-row__value">
+                          {summary.watchlist.lowActivityAgents.length
+                            ? summary.watchlist.lowActivityAgents.map((agent) => `${agent.name} (${agent.calls})`).join(', ')
+                            : 'No low-activity agents in this range.'}
+                        </div>
+                      </div>
+                    </div>
                   </div>
-                )}
+                </div>
               </div>
             </div>
-
-            <div className="card">
-              <div className="card-header card-header--dense">
-                <div>
-                  <div className="card-kicker">Execution</div>
-                  <h2 className="card-title">Campaign Pipeline</h2>
-                </div>
-                <Link to="/admin/campaigns" className="card-link">View all →</Link>
-              </div>
-              <div className="table-header">
-                <div className="table-col" style={{ flex: 2 }}>Campaign</div>
-                <div className="table-col">Status</div>
-                <div className="table-col">Leads</div>
-                <div className="table-col">Priority</div>
-                <div className="table-col"></div>
-              </div>
-              {campaigns.map((c) => <CampaignRow key={c.id as string} c={c} />)}
-              {campaigns.length === 0 && (
-                <div className="empty-state">
-                  <FolderOpen size={32} />
-                  <p>No campaigns yet. <Link to="/admin/campaigns" style={{ color: 'var(--accent)' }}>Create one →</Link></p>
-                </div>
-              )}
-            </div>
+          </>
+        ) : (
+          <div className="card" style={{ padding: 32 }}>
+            <EmptyState message="Loading admin dashboard analytics..." />
           </div>
-
-          <div className="dashboard-stack">
-            <div className="card">
-              <div className="card-header card-header--dense">
-                <div>
-                  <div className="card-kicker">Coverage</div>
-                  <h2 className="card-title">Agent Status</h2>
-                </div>
-                <Link to="/admin/users" className="card-link">View all →</Link>
-              </div>
-              <div className="table-header">
-                <div className="table-col" style={{ flex: 2 }}>Agent</div>
-                <div className="table-col">Status</div>
-                <div className="table-col">Team</div>
-              </div>
-              {agents.slice(0, 8).map((u) => (
-                <AgentRow key={u.id as string} u={u} />
-              ))}
-              {agents.length === 0 && (
-                <div className="empty-state"><AlertCircle size={24} /><p>No agents found</p></div>
-              )}
-            </div>
-
-            <div className="card">
-              <div className="card-header card-header--dense">
-                <div>
-                  <div className="card-kicker">Watchlist</div>
-                  <h2 className="card-title">Operations Signals</h2>
-                </div>
-              </div>
-              <div className="card-body signal-list">
-                <div className="signal-row">
-                  <div className="signal-row__icon signal-row__icon--blue"><TrendingUp size={16} /></div>
-                  <div className="signal-row__body">
-                    <div className="signal-row__label">Connect performance</div>
-                    <div className="signal-row__value">{connectRate}% of calls connected in the last 7 days.</div>
-                  </div>
-                </div>
-                <div className="signal-row">
-                  <div className="signal-row__icon signal-row__icon--amber"><Clock size={16} /></div>
-                  <div className="signal-row__body">
-                    <div className="signal-row__label">Callback queue</div>
-                    <div className="signal-row__value">{callbackCount} leads requested another touchpoint.</div>
-                  </div>
-                </div>
-                <div className="signal-row">
-                  <div className="signal-row__icon signal-row__icon--green"><UserCheck size={16} /></div>
-                  <div className="signal-row__body">
-                    <div className="signal-row__label">Staffing</div>
-                    <div className="signal-row__value">{agents.length} agents mapped across {users.filter((u) => u.role === 'supervisor').length} supervisors.</div>
-                  </div>
-                </div>
-              </div>
-            </div>
-          </div>
-        </div>
+        )}
       </div>
     </AppLayout>
   );

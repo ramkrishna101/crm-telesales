@@ -1,4 +1,4 @@
-import { useEffect, useState, useRef, useSyncExternalStore } from 'react';
+import { useEffect, useMemo, useState, useRef, useSyncExternalStore } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { leadsService, usersService, campaignsService, tagsService } from '../../services/crm.service';
 import AppLayout from '../../components/layout/AppLayout';
@@ -7,7 +7,7 @@ import DateRangeFilter, { computeRange, type DateRangePreset, type DateRangeValu
 import MultiSelectDropdown from '../../components/ui/MultiSelectDropdown';
 import toast from 'react-hot-toast';
 import * as XLSX from 'xlsx';
-import { Upload, Search, RefreshCw, ChevronLeft, ChevronRight, Download, FileSpreadsheet, CheckCircle2, X, UserCheck, Phone, PhoneCall, Trash2, SlidersHorizontal, Copy } from 'lucide-react';
+import { Upload, Search, RefreshCw, ChevronLeft, ChevronRight, Download, FileSpreadsheet, CheckCircle2, X, UserCheck, Phone, PhoneCall, Trash2, SlidersHorizontal, Copy, ChevronDown } from 'lucide-react';
 import { stringeeService } from '../../services/stringee.service';
 
 type OptionalColumnKey = 'followupStatus' | 'priority' | 'assignedTo' | 'lastCallResult' | 'language' | 'createdTime' | 'lastCalled';
@@ -357,6 +357,7 @@ export default function LeadsPage() {
   const qc = useQueryClient();
   const commonLanguages = ['Hindi', 'Kannada', 'Telugu', 'Tamil', 'Malayalam', 'Not Required'];
   const columnMenuRef = useRef<HTMLDivElement>(null);
+  const bulkActionMenuRef = useRef<HTMLDivElement>(null);
   const [draftCampaignFilters, setDraftCampaignFilters] = useState<string[]>([]);
   const [campaignFilters, setCampaignFilters] = useState<string[]>([]);
   const [draftStatusFilters, setDraftStatusFilters] = useState<string[]>([]);
@@ -391,6 +392,12 @@ export default function LeadsPage() {
   const [draftVisibleColumns, setDraftVisibleColumns] = useState<Record<OptionalColumnKey, boolean>>(visibleColumns);
   const [selected, setSelected] = useState<string[]>([]);
   const [confirmDelete, setConfirmDelete] = useState<string[] | null>(null);
+  const [isBulkActionMenuOpen, setIsBulkActionMenuOpen] = useState(false);
+  const [changeOwnerLeadIds, setChangeOwnerLeadIds] = useState<string[] | null>(null);
+  const [changeOwnerSearch, setChangeOwnerSearch] = useState('');
+  const [selectedOwnerId, setSelectedOwnerId] = useState('');
+  const [isSelectingAllFiltered, setIsSelectingAllFiltered] = useState(false);
+  const [isAllFilteredSelected, setIsAllFilteredSelected] = useState(false);
   const [pageSize, setPageSize] = useState<number>(10);
 
   useEffect(() => {
@@ -407,6 +414,34 @@ export default function LeadsPage() {
   }, [isColumnMenuOpen]);
 
   useEffect(() => {
+    if (!isBulkActionMenuOpen) return;
+
+    const handlePointerDown = (event: MouseEvent) => {
+      if (!bulkActionMenuRef.current?.contains(event.target as Node)) {
+        setIsBulkActionMenuOpen(false);
+      }
+    };
+
+    document.addEventListener('mousedown', handlePointerDown);
+    return () => document.removeEventListener('mousedown', handlePointerDown);
+  }, [isBulkActionMenuOpen]);
+
+  useEffect(() => {
+    if (!changeOwnerLeadIds) return;
+
+    const handleEscape = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        setChangeOwnerLeadIds(null);
+        setChangeOwnerSearch('');
+        setSelectedOwnerId('');
+      }
+    };
+
+    document.addEventListener('keydown', handleEscape);
+    return () => document.removeEventListener('keydown', handleEscape);
+  }, [changeOwnerLeadIds]);
+
+  useEffect(() => {
     if (!isColumnMenuOpen) return;
     setDraftVisibleColumns(visibleColumns);
   }, [isColumnMenuOpen, visibleColumns]);
@@ -416,6 +451,12 @@ export default function LeadsPage() {
   const serializedStatusFilters = serializeFilterValues(statusFilters);
   const serializedCallResultFilters = serializeFilterValues(callResultFilters);
   const serializedLanguageFilters = serializeFilterValues(languageFilters);
+
+  useEffect(() => {
+    setSelected([]);
+    setIsAllFilteredSelected(false);
+    setIsBulkActionMenuOpen(false);
+  }, [serializedCampaignFilters, serializedAgentFilters, serializedStatusFilters, serializedCallResultFilters, serializedLanguageFilters, createdFromFilter, createdToFilter]);
 
   const hasUnapplied =
     !arraysEqual(draftCampaignFilters, campaignFilters) ||
@@ -564,6 +605,10 @@ export default function LeadsPage() {
   };
 
   const leads: Lead[] = leadsData?.data?.data?.leads || [];
+  const displayedLeads = useMemo(
+    () => leads.filter((lead) => !search || (lead.name || '').toLowerCase().includes(search.toLowerCase())),
+    [leads, search],
+  );
   const languageOptions = Array.from(
     new Map(
       [...commonLanguages, ...leads.map((lead) => lead.lastCallLanguage || ''), ...languageFilters, ...draftLanguages]
@@ -574,8 +619,16 @@ export default function LeadsPage() {
   const total: number = leadsData?.data?.data?.total || 0;
   const campaigns = campaignsData?.data?.data?.campaigns || [];
   const agents = agentsData?.data?.data?.users || [];
+  const filteredOwnerAgents = useMemo(() => {
+    const query = changeOwnerSearch.trim().toLowerCase();
+    return (agents as Array<{ id: string; name: string }>).filter((agent) =>
+      !query || agent.name.toLowerCase().includes(query) || agent.id.toLowerCase().includes(query),
+    );
+  }, [agents, changeOwnerSearch]);
   const pages = Math.max(1, Math.ceil(total / pageSize));
   const callState = useSyncExternalStore(stringeeService.subscribe, stringeeService.getSnapshot);
+  const allDisplayedSelected = displayedLeads.length > 0 && displayedLeads.every((lead) => selected.includes(lead.id));
+  const hasSelectionBeyondDisplayed = selected.some((id) => !displayedLeads.some((lead) => lead.id === id));
 
   const statusColour: Record<string, string> = {
     uncontacted: '#6f63ff', contacted: '#3b82f6', lead: '#1f9d55',
@@ -608,7 +661,49 @@ export default function LeadsPage() {
   };
 
   const toggleSelect = (id: string) =>
-    setSelected((s) => s.includes(id) ? s.filter((x) => x !== id) : [...s, id]);
+    setSelected((s) => {
+      const next = s.includes(id) ? s.filter((x) => x !== id) : [...s, id];
+      if (isAllFilteredSelected) setIsAllFilteredSelected(false);
+      return next;
+    });
+  const toggleSelectDisplayed = (checked: boolean) => {
+    if (!checked) {
+      setSelected((current) => current.filter((id) => !displayedLeads.some((lead) => lead.id === id)));
+      setIsAllFilteredSelected(false);
+      return;
+    }
+
+    setSelected((current) => Array.from(new Set([...current, ...displayedLeads.map((lead) => lead.id)])));
+  };
+  const clearSelection = () => {
+    setSelected([]);
+    setIsAllFilteredSelected(false);
+    setIsBulkActionMenuOpen(false);
+  };
+  const selectAllFilteredLeads = async () => {
+    try {
+      setIsSelectingAllFiltered(true);
+      const response = await leadsService.list({
+        page: 1,
+        limit: total,
+        ...(serializedCampaignFilters ? { campaignId: serializedCampaignFilters } : {}),
+        ...(serializedStatusFilters ? { status: serializedStatusFilters } : {}),
+        ...(serializedAgentFilters ? { assignedToId: serializedAgentFilters } : {}),
+        ...(serializedCallResultFilters ? { callResult: serializedCallResultFilters } : {}),
+        ...(serializedLanguageFilters ? { language: serializedLanguageFilters } : {}),
+        ...(createdFromFilter ? { from: createdFromFilter } : {}),
+        ...(createdToFilter ? { to: createdToFilter } : {}),
+      });
+      const allLeadIds = ((response.data?.data?.leads || []) as Lead[]).map((lead) => lead.id);
+      setSelected(allLeadIds);
+      setIsAllFilteredSelected(true);
+      toast.success(`Selected ${allLeadIds.length.toLocaleString()} filtered leads`);
+    } catch {
+      toast.error('Failed to select all filtered leads');
+    } finally {
+      setIsSelectingAllFiltered(false);
+    }
+  };
   const toggleDraftColumn = (key: OptionalColumnKey) =>
     setDraftVisibleColumns((current) => ({ ...current, [key]: !current[key] }));
   const selectAllColumns = () => setDraftVisibleColumns(DEFAULT_VISIBLE_COLUMNS);
@@ -645,6 +740,34 @@ export default function LeadsPage() {
     }
   };
 
+  const openChangeOwnerDialog = (leadIds: string[]) => {
+    setChangeOwnerLeadIds(leadIds);
+    setChangeOwnerSearch('');
+    setSelectedOwnerId('');
+    setIsBulkActionMenuOpen(false);
+  };
+
+  const closeChangeOwnerDialog = () => {
+    setChangeOwnerLeadIds(null);
+    setChangeOwnerSearch('');
+    setSelectedOwnerId('');
+  };
+
+  const handleChangeOwner = () => {
+    if (!changeOwnerLeadIds || !selectedOwnerId) return;
+    assignMutation.mutate(
+      { leadIds: changeOwnerLeadIds, agentId: selectedOwnerId },
+      {
+        onSuccess: (res) => {
+          qc.invalidateQueries({ queryKey: ['leads'] });
+          toast.success(res.data.data.message);
+          setSelected([]);
+          closeChangeOwnerDialog();
+        },
+      },
+    );
+  };
+
   return (
     <AppLayout>
       <div className="page-container">
@@ -655,23 +778,61 @@ export default function LeadsPage() {
           </div>
           <div style={{ display: 'flex', gap: 8 }}>
             {selected.length > 0 && (
-              <>
-                <select className="form-input" style={{ width: 180 }}
-                  onChange={(e) => e.target.value && assignMutation.mutate({ leadIds: selected, agentId: e.target.value })}>
-                  <option value="">Assign {selected.length} to…</option>
-                  {(agents as Record<string, string>[]).map((a) => <option key={a.id} value={a.id}>{a.name}</option>)}
-                </select>
-                <button className="btn btn-secondary" onClick={() => reclaimMutation.mutate(selected)}>
-                  Reclaim {selected.length}
-                </button>
+              <div ref={bulkActionMenuRef} style={{ position: 'relative' }}>
                 <button
+                  type="button"
                   className="btn btn-secondary"
-                  style={{ color: '#ef4444', borderColor: '#ef4444' }}
-                  onClick={() => setConfirmDelete(selected)}
+                  onClick={() => setIsBulkActionMenuOpen((open) => !open)}
+                  style={{ minWidth: 150, justifyContent: 'space-between', gap: 10 }}
                 >
-                  <Trash2 size={14} /> Delete {selected.length}
+                  <span>Action ({selected.length.toLocaleString()})</span>
+                  <ChevronDown size={15} style={{ transform: isBulkActionMenuOpen ? 'rotate(180deg)' : 'none', transition: 'transform 120ms' }} />
                 </button>
-              </>
+                {isBulkActionMenuOpen && (
+                  <div
+                    style={{
+                      position: 'absolute',
+                      top: 'calc(100% + 6px)',
+                      left: 0,
+                      width: 220,
+                      background: '#fff',
+                      border: '1px solid var(--border)',
+                      borderRadius: 12,
+                      boxShadow: '0 18px 48px rgba(15, 23, 42, 0.16)',
+                      padding: 8,
+                      zIndex: 40,
+                    }}
+                  >
+                    <button
+                      type="button"
+                      onClick={() => openChangeOwnerDialog(selected)}
+                      style={{ width: '100%', border: 'none', background: 'transparent', padding: '10px 12px', borderRadius: 8, textAlign: 'left', fontSize: '0.88rem', fontWeight: 600, color: 'var(--text-primary)', cursor: 'pointer' }}
+                    >
+                      Change Owner
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        reclaimMutation.mutate(selected);
+                        setIsBulkActionMenuOpen(false);
+                      }}
+                      style={{ width: '100%', border: 'none', background: 'transparent', padding: '10px 12px', borderRadius: 8, textAlign: 'left', fontSize: '0.88rem', fontWeight: 600, color: 'var(--text-primary)', cursor: 'pointer' }}
+                    >
+                      Reclaim
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setConfirmDelete(selected);
+                        setIsBulkActionMenuOpen(false);
+                      }}
+                      style={{ width: '100%', border: 'none', background: 'transparent', padding: '10px 12px', borderRadius: 8, textAlign: 'left', fontSize: '0.88rem', fontWeight: 600, color: '#dc2626', cursor: 'pointer' }}
+                    >
+                      Delete
+                    </button>
+                  </div>
+                )}
+              </div>
             )}
             <button className="btn btn-secondary" onClick={downloadTemplate}>
               <Download size={15} /> Template
@@ -826,10 +987,41 @@ export default function LeadsPage() {
           </div>
         </div>
 
+        {selected.length > 0 && (
+          <div style={{ marginTop: 14, marginBottom: 10, padding: '10px 14px', borderRadius: 10, border: '1px solid #c7d2fe', background: '#eef2ff', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap' }}>
+            <div style={{ fontSize: '0.88rem', color: '#3730a3', fontWeight: 600 }}>
+              {isAllFilteredSelected
+                ? `All ${selected.length.toLocaleString()} filtered leads are selected.`
+                : `${selected.length.toLocaleString()} lead${selected.length > 1 ? 's' : ''} selected.`}
+            </div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
+              {!isAllFilteredSelected && total > selected.length && (
+                <button
+                  type="button"
+                  onClick={() => void selectAllFilteredLeads()}
+                  disabled={isSelectingAllFiltered}
+                  style={{ border: 'none', background: 'transparent', padding: 0, color: '#4f46e5', fontWeight: 700, fontSize: '0.85rem', cursor: isSelectingAllFiltered ? 'not-allowed' : 'pointer' }}
+                >
+                  {isSelectingAllFiltered ? 'Selecting…' : `Select all ${total.toLocaleString()} filtered leads`}
+                </button>
+              )}
+              {(hasSelectionBeyondDisplayed || isAllFilteredSelected || selected.length > 0) && (
+                <button
+                  type="button"
+                  onClick={clearSelection}
+                  style={{ border: 'none', background: 'transparent', padding: 0, color: '#475569', fontWeight: 600, fontSize: '0.85rem', cursor: 'pointer' }}
+                >
+                  Clear selection
+                </button>
+              )}
+            </div>
+          </div>
+        )}
+
         {/* Table */}
         <div className="card">
           <div className="table-header">
-            <div style={{ width: 28 }}><input type="checkbox" onChange={(e) => setSelected(e.target.checked ? leads.map(l => l.id) : [])} /></div>
+            <div style={{ width: 28 }}><input type="checkbox" checked={allDisplayedSelected} onChange={(e) => toggleSelectDisplayed(e.target.checked)} /></div>
             <div className="table-col" style={{ flex: 2 }}>Contact</div>
             {visibleColumns.followupStatus && <div className="table-col">Followup Status</div>}
             {visibleColumns.priority && <div className="table-col">Priority</div>}
@@ -925,9 +1117,7 @@ export default function LeadsPage() {
             </div>
           </div>
           {isLoading && <div className="empty-state"><RefreshCw className="spin" size={20} /><p>Loading…</p></div>}
-          {leads
-            .filter(l => !search || (l.name || '').toLowerCase().includes(search.toLowerCase()))
-            .map((l) => (
+          {displayedLeads.map((l) => (
             <div key={l.id} className={`table-row ${selected.includes(l.id) ? 'table-row--selected' : ''}`}>
               <div style={{ width: 28 }}><input type="checkbox" checked={selected.includes(l.id)} onChange={() => toggleSelect(l.id)} /></div>
               <div className="table-cell" style={{ flex: 2 }}>
@@ -1080,6 +1270,85 @@ export default function LeadsPage() {
         onConfirm={() => confirmDelete && deleteMutation.mutate(confirmDelete)}
         onCancel={() => setConfirmDelete(null)}
       />
+
+      {changeOwnerLeadIds && (
+        <div
+          className="modal-overlay"
+          style={{ alignItems: 'flex-start', paddingTop: 88, background: 'rgba(15,23,42,0.28)' }}
+          onClick={closeChangeOwnerDialog}
+        >
+          <div
+            className="modal"
+            style={{ width: 'min(420px, calc(100vw - 32px))' }}
+            onClick={(event) => event.stopPropagation()}
+            role="dialog"
+            aria-modal="true"
+          >
+            <div className="modal-header">
+              <h2 className="modal-title">Change Owner</h2>
+              <button className="btn-icon" onClick={closeChangeOwnerDialog}>
+                <X size={18} />
+              </button>
+            </div>
+            <div className="modal-body" style={{ display: 'grid', gap: 12 }}>
+              <div style={{ fontSize: '0.9rem', color: 'var(--text-secondary)' }}>
+                Assign {changeOwnerLeadIds.length} selected lead{changeOwnerLeadIds.length > 1 ? 's' : ''} to an agent.
+              </div>
+              <div className="search-box" style={{ maxWidth: '100%' }}>
+                <Search size={15} className="search-icon" />
+                <input
+                  className="search-input"
+                  placeholder="Search agent..."
+                  value={changeOwnerSearch}
+                  onChange={(event) => setChangeOwnerSearch(event.target.value)}
+                />
+              </div>
+              <div style={{ border: '1px solid var(--border)', borderRadius: 10, maxHeight: 260, overflowY: 'auto', padding: 6, background: 'var(--bg-surface)' }}>
+                {filteredOwnerAgents.length === 0 ? (
+                  <div style={{ padding: '12px 10px', color: 'var(--text-muted)', fontSize: '0.88rem' }}>No agents found.</div>
+                ) : (
+                  filteredOwnerAgents.map((agent) => {
+                    const active = selectedOwnerId === agent.id;
+                    return (
+                      <button
+                        key={agent.id}
+                        type="button"
+                        onClick={() => setSelectedOwnerId(agent.id)}
+                        style={{
+                          width: '100%',
+                          border: 'none',
+                          background: active ? '#eef2ff' : 'transparent',
+                          color: active ? '#3730a3' : 'var(--text-primary)',
+                          padding: '10px 12px',
+                          borderRadius: 8,
+                          textAlign: 'left',
+                          cursor: 'pointer',
+                          fontSize: '0.9rem',
+                          fontWeight: active ? 700 : 500,
+                        }}
+                      >
+                        {agent.name}
+                      </button>
+                    );
+                  })
+                )}
+              </div>
+            </div>
+            <div className="modal-footer">
+              <button className="btn btn-secondary" onClick={closeChangeOwnerDialog}>
+                Cancel
+              </button>
+              <button
+                className="btn btn-primary"
+                onClick={handleChangeOwner}
+                disabled={!selectedOwnerId || assignMutation.isPending}
+              >
+                {assignMutation.isPending ? 'Updating…' : 'Change Owner'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </AppLayout>
   );
 }

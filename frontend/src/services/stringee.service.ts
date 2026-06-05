@@ -63,9 +63,11 @@ export interface LastCallSummary {
   answeredAt: string | null;
   endedAt: string;
   durationSeconds: number;
+  totalDurationSeconds: number;
   answered: boolean;
   endReason: string;
   telephonyRef: string | null;
+  isManualLog: boolean;
 }
 
 const SDK_URL = 'https://cdn.stringee.com/sdk/web/latest/stringee-web-sdk.min.js';
@@ -502,6 +504,7 @@ class StringeeService {
     const startedAt = this.callStartedAt || now;
     const answeredAt = this.callAnsweredAt || null;
     const durationSeconds = answeredAt ? Math.max(0, Math.round((now - answeredAt) / 1000)) : 0;
+    const totalDurationSeconds = Math.max(0, Math.round((now - startedAt) / 1000));
     const summary: LastCallSummary = {
       leadId: activeLeadId,
       leadName: activeLeadName,
@@ -511,9 +514,11 @@ class StringeeService {
       answeredAt: answeredAt ? new Date(answeredAt).toISOString() : null,
       endedAt: new Date(now).toISOString(),
       durationSeconds,
+      totalDurationSeconds,
       answered,
       endReason: reason,
       telephonyRef: this.currentCallId,
+      isManualLog: false,
     };
     this.callStartedAt = null;
     this.callAnsweredAt = null;
@@ -548,9 +553,11 @@ class StringeeService {
           answeredAt: null,
           endedAt: new Date().toISOString(),
           durationSeconds: 0,
+          totalDurationSeconds: 0,
           answered: false,
           endReason: 'MANUAL_LOG',
           telephonyRef: null,
+          isManualLog: true,
         };
     this.update({ lastCall: summary, showOutcome: true });
   };

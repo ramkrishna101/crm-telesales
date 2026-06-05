@@ -117,6 +117,10 @@ export const callsService = {
   cdr: (callId: string) => api.get(`/calls/cdr/${callId}`),
 };
 
+export const adminService = {
+  dashboard: (params?: Record<string, string>) => api.get('/admin/dashboard', { params }),
+};
+
 // ── Tags ──────────────────────────────────────────────────────────────
 export const tagsService = {
   list: () => api.get('/tags'),

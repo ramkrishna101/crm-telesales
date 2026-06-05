@@ -1,10 +1,11 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { Clock3, PhoneCall, PhoneForwarded, RefreshCw, Search, TimerReset } from 'lucide-react';
+import { Clock3, Copy, PhoneCall, PhoneForwarded, RefreshCw, Search, TimerReset } from 'lucide-react';
+import toast from 'react-hot-toast';
 import AppLayout from '../../components/layout/AppLayout';
 import DateRangeFilter, { computeRange, type DateRangeValue } from '../../components/ui/DateRangeFilter';
 import Dropdown from '../../components/ui/Dropdown';
-import { callsService, tagsService, usersService } from '../../services/crm.service';
+import { callsService, leadsService, tagsService, usersService } from '../../services/crm.service';
 
 interface AgentOption {
   id: string;
@@ -22,6 +23,7 @@ interface CallLogRow {
   calledAt: string;
   dispositionTag?: string | null;
   durationSeconds?: number | null;
+  isManual?: boolean;
   notes?: string | null;
   agent?: { id: string; name: string } | null;
   lead?: {
@@ -177,6 +179,28 @@ export default function AdminCallsPage() {
     resultTags.map((tag: TagOption) => ({ value: tag.name, label: tag.name, colour: tag.colour || undefined })),
   );
 
+  const copyPhone = async (leadId?: string) => {
+    if (!leadId) {
+      toast.error('Phone number unavailable');
+      return;
+    }
+
+    try {
+      const response = await leadsService.getPhone(leadId);
+      const phone = response.data?.data?.phone;
+      if (!phone) {
+        toast.error('Phone number unavailable');
+        return;
+      }
+
+      await navigator.clipboard.writeText(phone);
+      toast.success(`Copied: ${phone}`);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Clipboard not available';
+      toast.error(message);
+    }
+  };
+
   return (
     <AppLayout>
       <div className="page-container">
@@ -283,15 +307,47 @@ export default function AdminCallsPage() {
                     </div>
                     <div className="table-cell" style={{ flex: 1.3, minWidth: 0 }}>
                       <div style={{ fontWeight: 600, color: 'var(--text-primary)' }}>{log.lead?.name || '-'}</div>
-                      <div style={{ fontSize: '0.76rem', color: 'var(--text-muted)' }}>{log.lead?.phoneMasked || '-'}</div>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: '0.76rem', color: 'var(--text-muted)' }}>
+                        <span>{log.lead?.phoneMasked || '-'}</span>
+                        {log.lead?.id ? (
+                          <button
+                            type="button"
+                            onClick={() => void copyPhone(log.lead?.id)}
+                            aria-label="Copy phone number"
+                            title="Copy phone number"
+                            style={{
+                              display: 'inline-flex',
+                              alignItems: 'center',
+                              justifyContent: 'center',
+                              width: 24,
+                              height: 24,
+                              borderRadius: 999,
+                              border: '1px solid var(--border)',
+                              background: '#fff',
+                              color: 'var(--text-secondary)',
+                              cursor: 'pointer',
+                              padding: 0,
+                            }}
+                          >
+                            <Copy size={12} />
+                          </button>
+                        ) : null}
+                      </div>
                     </div>
                     <div className="table-cell" style={{ flex: 1 }}>
                       {log.lead?.campaign?.name || '-'}
                     </div>
                     <div className="table-cell" style={{ flex: 0.9 }}>
-                      <span className="badge" style={{ background: '#eef2ff', color: '#4338ca' }}>
-                        {log.dispositionTag || '-'}
-                      </span>
+                      <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+                        <span className="badge" style={{ background: '#eef2ff', color: '#4338ca' }}>
+                          {log.dispositionTag || '-'}
+                        </span>
+                        {log.isManual ? (
+                          <span className="badge" style={{ background: '#fff1f2', color: '#be123c' }}>
+                            Manual Log
+                          </span>
+                        ) : null}
+                      </div>
                     </div>
                     <div className="table-cell" style={{ flex: 0.8, fontWeight: 600, color: 'var(--text-primary)' }}>
                       {formatDuration(log.durationSeconds)}

@@ -1,8 +1,9 @@
 import { useMemo } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { ArrowUpRight, PhoneCall, RefreshCw } from 'lucide-react';
+import { ArrowUpRight, Copy, PhoneCall, RefreshCw } from 'lucide-react';
+import toast from 'react-hot-toast';
 import AppLayout from '../../components/layout/AppLayout';
-import { callsService } from '../../services/crm.service';
+import { callsService, leadsService } from '../../services/crm.service';
 import { useIsMobile } from '../../hooks/useIsMobile';
 
 function getTodayRange() {
@@ -33,6 +34,28 @@ export default function AgentCallsPage() {
   const connectedCalls = summary?.agentLeaderboard?.reduce((sum: number, item: { connected: number }) => sum + item.connected, 0) || 0;
   const callbackCount = summary?.tagBreakdown?.find((tag: { tag: string; count: number }) => tag.tag === 'Callback')?.count || 0;
   const interestedCount = summary?.tagBreakdown?.find((tag: { tag: string; count: number }) => tag.tag === 'Interested')?.count || 0;
+
+  const copyPhone = async (leadId?: string) => {
+    if (!leadId) {
+      toast.error('Phone number unavailable');
+      return;
+    }
+
+    try {
+      const response = await leadsService.getPhone(leadId);
+      const phone = response.data?.data?.phone;
+      if (!phone) {
+        toast.error('Phone number unavailable');
+        return;
+      }
+
+      await navigator.clipboard.writeText(phone);
+      toast.success(`Copied: ${phone}`);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Clipboard not available';
+      toast.error(message);
+    }
+  };
 
   if (isMobile) {
     return (
@@ -88,9 +111,39 @@ export default function AgentCallsPage() {
                     <div className="agent-mobile-call-log-head">
                       <div>
                         <div className="agent-mobile-list-title">{log.lead?.name || 'Unknown Lead'}</div>
-                        <div className="agent-mobile-list-subtitle">{log.lead?.phoneMasked || log.lead?.phone || 'No phone available'}</div>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                          <div className="agent-mobile-list-subtitle">{log.lead?.phoneMasked || log.lead?.phone || 'No phone available'}</div>
+                          {log.lead?.id ? (
+                            <button
+                              type="button"
+                              onClick={() => void copyPhone(log.lead?.id)}
+                              aria-label="Copy phone number"
+                              title="Copy phone number"
+                              style={{
+                                display: 'inline-flex',
+                                alignItems: 'center',
+                                justifyContent: 'center',
+                                width: 24,
+                                height: 24,
+                                borderRadius: 999,
+                                border: '1px solid var(--border)',
+                                background: '#fff',
+                                color: 'var(--text-secondary)',
+                                cursor: 'pointer',
+                                padding: 0,
+                              }}
+                            >
+                              <Copy size={12} />
+                            </button>
+                          ) : null}
+                        </div>
                       </div>
-                      <span className="agent-mobile-status-chip">{log.dispositionTag || 'Pending'}</span>
+                      <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', justifyContent: 'flex-end' }}>
+                        <span className="agent-mobile-status-chip">{log.dispositionTag || 'Pending'}</span>
+                        {log.isManual ? (
+                          <span className="agent-mobile-status-chip" style={{ background: '#fff1f2', color: '#be123c' }}>Manual Log</span>
+                        ) : null}
+                      </div>
                     </div>
                     <div className="agent-mobile-followup-time">
                       <PhoneCall size={14} />
@@ -131,12 +184,39 @@ export default function AgentCallsPage() {
               {logs.map((log: any) => (
                 <div key={log.id} className="followup-row">
                   <div className="agent-mobile-list-title">{log.lead?.name || 'Unknown Lead'}</div>
-                  <div className="agent-mobile-list-subtitle">{log.lead?.phoneMasked || log.lead?.phone || 'No phone available'}</div>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                    <div className="agent-mobile-list-subtitle">{log.lead?.phoneMasked || log.lead?.phone || 'No phone available'}</div>
+                    {log.lead?.id ? (
+                      <button
+                        type="button"
+                        onClick={() => void copyPhone(log.lead?.id)}
+                        aria-label="Copy phone number"
+                        title="Copy phone number"
+                        style={{
+                          display: 'inline-flex',
+                          alignItems: 'center',
+                          justifyContent: 'center',
+                          width: 24,
+                          height: 24,
+                          borderRadius: 999,
+                          border: '1px solid var(--border)',
+                          background: '#fff',
+                          color: 'var(--text-secondary)',
+                          cursor: 'pointer',
+                          padding: 0,
+                        }}
+                      >
+                        <Copy size={12} />
+                      </button>
+                    ) : null}
+                  </div>
                   <div className="agent-mobile-followup-time">
                     <PhoneCall size={14} />
                     <span>{new Date(log.calledAt).toLocaleString()}</span>
                   </div>
-                  <div className="agent-mobile-muted">{log.dispositionTag || 'No disposition'}{log.notes ? ` · ${log.notes}` : ''}</div>
+                  <div className="agent-mobile-muted">
+                    {log.dispositionTag || 'No disposition'}{log.isManual ? ' · Manual Log' : ''}{log.notes ? ` · ${log.notes}` : ''}
+                  </div>
                 </div>
               ))}
             </div>

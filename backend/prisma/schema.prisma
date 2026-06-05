@@ -254,6 +254,8 @@ model CallLog {
   agentId         String
   dispositionTag  String
   durationSeconds Int      @default(0)
+  totalDurationSeconds Int @default(0)
+  isManual        Boolean  @default(false)
   notes           String?
   telephonyRef    String?  // Provider call ID — populated after telephony integration
   calledAt        DateTime @default(now())

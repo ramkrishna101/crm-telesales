@@ -486,19 +486,26 @@ export default function AgentLeadProfilePage() {
                           }}
                         >
                           <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 6, gap: 8 }}>
-                            <span
-                              style={{
-                                background: '#dcfce7',
-                                color: '#15803d',
-                                padding: '2px 8px',
-                                borderRadius: 999,
-                                fontSize: 10,
-                                fontWeight: 700,
-                                textTransform: 'uppercase',
-                              }}
-                            >
-                              {log.dispositionTag || 'Unknown'}
-                            </span>
+                            <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+                              <span
+                                style={{
+                                  background: '#dcfce7',
+                                  color: '#15803d',
+                                  padding: '2px 8px',
+                                  borderRadius: 999,
+                                  fontSize: 10,
+                                  fontWeight: 700,
+                                  textTransform: 'uppercase',
+                                }}
+                              >
+                                {log.dispositionTag || 'Unknown'}
+                              </span>
+                              {log.isManual ? (
+                                <span style={{ background: '#fff1f2', color: '#be123c', padding: '2px 8px', borderRadius: 999, fontSize: 10, fontWeight: 700, textTransform: 'uppercase' }}>
+                                  Manual Log
+                                </span>
+                              ) : null}
+                            </div>
                             <span style={{ fontSize: 11, color: '#94a3b8' }}>
                               {new Date(log.calledAt).toLocaleString()}
                             </span>

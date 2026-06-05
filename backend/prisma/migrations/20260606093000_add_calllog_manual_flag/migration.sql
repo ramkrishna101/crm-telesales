@@ -1,0 +1,2 @@
+ALTER TABLE "call_logs"
+ADD COLUMN "isManual" BOOLEAN NOT NULL DEFAULT false;
