@@ -162,7 +162,6 @@ router.post('/agent-token', async (req: Request, res: Response, next: NextFuncti
         'Ask your admin to set your Stringee Account ID before placing calls',
       );
     }
-
     let authToken: string;
     try {
       const portal = await resolveAssignedStringeePortalForUser(user.id);

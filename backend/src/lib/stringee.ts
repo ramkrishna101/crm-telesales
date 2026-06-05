@@ -1,9 +1,9 @@
 import crypto from 'crypto';
 
 const DEFAULT_SERVER_ADDRS = [
-  'wss://india-s1.stringee.com:31082/',
-  'wss://india-s2.stringee.com:31082/',
-  'wss://india-s3.stringee.com:31082/',
+  'wss://india-s1.stringee.com:32082/',
+  'wss://india-s2.stringee.com:32082/',
+  'wss://india-s3.stringee.com:32082/',
 ];
 
 const DEFAULT_TOKEN_TTL_SECONDS = 3600;
