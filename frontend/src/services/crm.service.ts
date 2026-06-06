@@ -26,6 +26,7 @@ export const stringeePortalConfigsService = {
   get: (id: string) => api.get(`/stringee-portals/${id}`),
   create: (data: Record<string, unknown>) => api.post('/stringee-portals', data),
   update: (id: string, data: Record<string, unknown>) => api.put(`/stringee-portals/${id}`, data),
+  delete: (id: string) => api.delete(`/stringee-portals/${id}`),
 };
 
 // ── Users ─────────────────────────────────────────────────────────────

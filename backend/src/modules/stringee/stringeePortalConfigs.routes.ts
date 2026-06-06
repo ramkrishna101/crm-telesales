@@ -176,4 +176,26 @@ router.put('/:id', async (req: Request, res: Response, next: NextFunction) => {
   }
 });
 
+router.delete('/:id', async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const id = param(req, 'id');
+    const existing = await prisma.stringeePortalConfig.findUnique({
+      where: { id },
+      select: { id: true, branchId: true, portalName: true },
+    });
+
+    if (!existing) throw new AppError(404, 'STRINGEE_PORTAL_NOT_FOUND', 'Stringee portal configuration not found');
+    assertBranchAccess(req.user!, existing.branchId);
+
+    await prisma.stringeePortalConfig.delete({ where: { id } });
+
+    res.json({
+      success: true,
+      data: { message: `Deleted portal configuration: ${existing.portalName}` },
+    });
+  } catch (err) {
+    next(err);
+  }
+});
+
 export default router;

@@ -1,10 +1,11 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import AppLayout from '../../components/layout/AppLayout';
+import ConfirmDialog from '../../components/ui/ConfirmDialog';
 import { branchesService, stringeePortalConfigsService } from '../../services/crm.service';
 import { useAuthStore } from '../../store/authStore';
 import toast from 'react-hot-toast';
-import { Plus, Edit2, X } from 'lucide-react';
+import { Plus, Edit2, Trash2, X } from 'lucide-react';
 
 interface BranchRecord {
   id: string;
@@ -107,6 +108,7 @@ export default function ConfigurationPage() {
   const [selectedBranchId, setSelectedBranchId] = useState(user?.branchId || '');
   const [showCreate, setShowCreate] = useState(false);
   const [editingPortal, setEditingPortal] = useState<StringeePortalConfig | null>(null);
+  const [deletePortal, setDeletePortal] = useState<StringeePortalConfig | null>(null);
 
   const { data: branchesData } = useQuery({
     queryKey: ['branches'],
@@ -152,6 +154,16 @@ export default function ConfigurationPage() {
       queryClient.invalidateQueries({ queryKey: ['stringee-portals', selectedBranchId] });
     },
     onError: (error: any) => toast.error(error.response?.data?.error?.message || 'Failed to update portal configuration'),
+  });
+
+  const deleteMutation = useMutation({
+    mutationFn: (id: string) => stringeePortalConfigsService.delete(id),
+    onSuccess: (response) => {
+      toast.success(response.data?.data?.message || 'Portal configuration deleted');
+      setDeletePortal(null);
+      queryClient.invalidateQueries({ queryKey: ['stringee-portals', selectedBranchId] });
+    },
+    onError: (error: any) => toast.error(error.response?.data?.error?.message || 'Failed to delete portal configuration'),
   });
 
   return (
@@ -208,10 +220,18 @@ export default function ConfigurationPage() {
               <div className="table-cell" style={{ color: 'var(--text-secondary)' }}>{config.tenant}</div>
               <div className="table-cell" style={{ color: 'var(--text-secondary)' }}>{config.adminEmailMasked}</div>
               <div className="table-cell" style={{ color: 'var(--text-secondary)' }}>{new Date(config.updatedAt).toLocaleDateString()}</div>
-              <div className="table-cell" style={{ justifyContent: 'flex-end' }}>
+              <div className="table-cell" style={{ justifyContent: 'flex-end', gap: 8 }}>
                 <button className="btn btn-secondary" onClick={() => setEditingPortal(config)}>
                   <Edit2 size={15} />
                   Edit
+                </button>
+                <button
+                  className="btn btn-secondary"
+                  onClick={() => setDeletePortal(config)}
+                  style={{ color: '#dc2626', borderColor: '#fecaca', background: '#fff5f5' }}
+                >
+                  <Trash2 size={15} />
+                  Delete
                 </button>
               </div>
             </div>
@@ -236,6 +256,17 @@ export default function ConfigurationPage() {
             isSaving={updateMutation.isPending}
           />
         )}
+
+        <ConfirmDialog
+          open={!!deletePortal}
+          title="Delete configured portal?"
+          message={deletePortal ? `Are you sure you want to delete ${deletePortal.portalName}? This will remove the saved Stringee credentials for this branch.` : ''}
+          confirmLabel="Delete portal"
+          variant="danger"
+          loading={deleteMutation.isPending}
+          onConfirm={() => deletePortal && deleteMutation.mutate(deletePortal.id)}
+          onCancel={() => setDeletePortal(null)}
+        />
       </div>
     </AppLayout>
   );
