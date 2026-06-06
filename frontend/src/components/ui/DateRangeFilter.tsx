@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Calendar, ChevronDown } from 'lucide-react';
 
-export type DateRangePreset = 'all_time' | 'today' | 'yesterday' | 'this_month' | 'last_7_days' | 'custom';
+export type DateRangePreset = 'all_time' | 'today' | 'yesterday' | 'last_month' | 'this_month' | 'last_7_days' | 'custom';
 
 export interface DateRangeValue {
   preset: DateRangePreset;
@@ -25,6 +25,15 @@ export function computeRange(preset: DateRangePreset, customFrom?: string, custo
     const y = toIstYmd(new Date(now.getTime() - 24 * 60 * 60 * 1000));
     return { from: y, to: y };
   }
+  if (preset === 'last_month') {
+    const istNow = new Date(now.getTime() + 5.5 * 60 * 60 * 1000);
+    const year = istNow.getUTCFullYear();
+    const month = istNow.getUTCMonth();
+    const lastMonthStart = new Date(Date.UTC(year, month - 1, 1));
+    const currentMonthStart = new Date(Date.UTC(year, month, 1));
+    const lastMonthEnd = new Date(currentMonthStart.getTime() - 24 * 60 * 60 * 1000);
+    return { from: toIstYmd(lastMonthStart), to: toIstYmd(lastMonthEnd) };
+  }
   if (preset === 'this_month') {
     const istNow = new Date(now.getTime() + 5.5 * 60 * 60 * 1000);
     const first = `${istNow.toISOString().slice(0, 7)}-01`;
@@ -42,6 +51,7 @@ const PRESET_LABELS: Record<DateRangePreset, string> = {
   all_time: 'All Time',
   today: 'Today',
   yesterday: 'Yesterday',
+  last_month: 'Last Month',
   this_month: 'This Month',
   last_7_days: 'Last 7 Days',
   custom: 'Custom Range',
@@ -94,8 +104,8 @@ export default function DateRangeFilter({
   const presets: DateRangePreset[] = useMemo(
     () => (
       includeAllTime
-        ? ['all_time', 'today', 'yesterday', 'last_7_days', 'this_month']
-        : ['today', 'yesterday', 'last_7_days', 'this_month']
+        ? ['all_time', 'today', 'yesterday', 'last_7_days', 'last_month', 'this_month']
+        : ['today', 'yesterday', 'last_7_days', 'last_month', 'this_month']
     ),
     [includeAllTime],
   );

@@ -56,7 +56,7 @@ const COMMON_LANGUAGE_OPTIONS = ['Hindi', 'Kannada', 'Telugu', 'Tamil', 'Malayal
 
 const AGENT_LEADS_VISIBLE_COLUMNS_STORAGE_KEY = 'agent-leads-visible-columns';
 
-const AGENT_DATE_RANGE_PRESETS: DateRangePreset[] = ['today', 'yesterday', 'last_7_days', 'this_month'];
+const AGENT_DATE_RANGE_PRESETS: DateRangePreset[] = ['today', 'yesterday', 'last_7_days', 'last_month', 'this_month'];
 
 function getCreatedDateRangeValue(from: string, to: string): DateRangeValue {
   if (!from && !to) return { preset: 'all_time', from: '', to: '' };

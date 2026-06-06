@@ -221,7 +221,9 @@ router.get('/summary', requireRole(...ADMIN_ROLES, 'supervisor'), async (req: Re
     const trimmedSearch = search?.trim();
 
     let dateFilter: Record<string, Date> | undefined;
-    if (from && to) {
+    if (from === '' && to === '') {
+      dateFilter = undefined;
+    } else if (from && to) {
       // Parse dates assuming the input is meant to be in IST (+05:30)
       const gte = new Date(`${from}T00:00:00+05:30`);
       const lte = new Date(`${to}T23:59:59.999+05:30`);
@@ -251,7 +253,8 @@ router.get('/summary', requireRole(...ADMIN_ROLES, 'supervisor'), async (req: Re
         : {}),
     };
 
-    const rawDateUpperClause = dateFilter.lte ? Prisma.sql`AND cl."calledAt" <= ${dateFilter.lte}` : Prisma.empty;
+    const rawDateLowerClause = dateFilter?.gte ? Prisma.sql`AND cl."calledAt" >= ${dateFilter.gte}` : Prisma.empty;
+    const rawDateUpperClause = dateFilter?.lte ? Prisma.sql`AND cl."calledAt" <= ${dateFilter.lte}` : Prisma.empty;
     const rawAgentClause = agentId
       ? Prisma.sql`AND cl."agentId" = ${agentId}`
       : scopedAgentIds
@@ -280,7 +283,8 @@ router.get('/summary', requireRole(...ADMIN_ROLES, 'supervisor'), async (req: Re
         SELECT EXTRACT(HOUR FROM cl."calledAt" AT TIME ZONE 'UTC' AT TIME ZONE 'Asia/Kolkata') as hour, COUNT(*) as count
         FROM call_logs cl
         JOIN leads l ON cl."leadId" = l.id
-        WHERE cl."calledAt" >= ${dateFilter.gte}
+        WHERE 1 = 1
+        ${rawDateLowerClause}
         ${rawDateUpperClause}
         ${rawAgentClause}
         ${rawDispositionClause}
@@ -297,7 +301,8 @@ router.get('/summary', requireRole(...ADMIN_ROLES, 'supervisor'), async (req: Re
            ROUND(AVG(cl."durationSeconds")) as "avgDuration"
          FROM call_logs cl
          JOIN leads l ON cl."leadId" = l.id
-         WHERE cl."calledAt" >= ${dateFilter.gte}
+         WHERE 1 = 1
+         ${rawDateLowerClause}
          ${rawDateUpperClause}
          ${rawAgentClause}
          ${rawDispositionClause}
@@ -327,7 +332,8 @@ router.get('/summary', requireRole(...ADMIN_ROLES, 'supervisor'), async (req: Re
           ROUND(AVG(cl."durationSeconds")) as "avgDuration"
         FROM users u JOIN call_logs cl ON cl."agentId" = u.id
         JOIN leads l ON cl."leadId" = l.id
-        WHERE cl."calledAt" >= ${dateFilter.gte}
+        WHERE 1 = 1
+        ${rawDateLowerClause}
         ${rawDateUpperClause}
         ${rawAgentClause}
         ${rawDispositionClause}
@@ -358,7 +364,8 @@ router.get('/summary', requireRole(...ADMIN_ROLES, 'supervisor'), async (req: Re
             COALESCE(cl."totalDurationSeconds", cl."durationSeconds", 0) as "totalDurationSeconds"
           FROM call_logs cl
           JOIN leads l ON cl."leadId" = l.id
-          WHERE cl."calledAt" >= ${dateFilter.gte}
+          WHERE 1 = 1
+          ${rawDateLowerClause}
           AND cl."isManual" = false
           ${rawDateUpperClause}
           ${rawAgentClause}

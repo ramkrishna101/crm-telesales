@@ -36,7 +36,7 @@ const PAGE_SIZE_OPTIONS = [10, 25, 50] as const;
 
 const LEADS_VISIBLE_COLUMNS_STORAGE_KEY = 'admin-leads-visible-columns';
 
-const DATE_RANGE_PRESETS: DateRangePreset[] = ['today', 'yesterday', 'last_7_days', 'this_month'];
+const DATE_RANGE_PRESETS: DateRangePreset[] = ['today', 'yesterday', 'last_7_days', 'last_month', 'this_month'];
 
 function getDateRangeValue(from: string, to: string): DateRangeValue {
   if (!from && !to) return { preset: 'all_time', from: '', to: '' };

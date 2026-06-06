@@ -92,7 +92,7 @@ export default function AnalyticsPage() {
                 ]}
               />
             </div>
-            <DateRangeFilter value={dateRange} onChange={setDateRange} />
+            <DateRangeFilter value={dateRange} onChange={setDateRange} includeAllTime allTimeLabel="All Data" />
           </div>
         </div>
 

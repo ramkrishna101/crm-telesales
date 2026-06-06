@@ -167,6 +167,7 @@ export default function AgentWorkspace() {
   const rangeLabel =
     dateRange.preset === 'today' ? 'Today' :
     dateRange.preset === 'yesterday' ? 'Yesterday' :
+    dateRange.preset === 'last_month' ? 'Last month' :
     dateRange.preset === 'this_month' ? 'This month' :
     dateRange.preset === 'last_7_days' ? 'Last 7 days' :
     `${dateRange.from} → ${dateRange.to}`;

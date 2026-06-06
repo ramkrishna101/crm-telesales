@@ -12,6 +12,13 @@ router.use(requireRole(...ADMIN_ROLES));
 type DateRange = { start: Date; end: Date };
 
 function resolveCurrentRange(from?: string, to?: string): DateRange {
+  if (from === '' && to === '') {
+    return {
+      start: new Date(0),
+      end: new Date(),
+    };
+  }
+
   if (from && to) {
     return {
       start: new Date(`${from}T00:00:00+05:30`),
@@ -110,7 +117,7 @@ router.get('/dashboard', async (req: Request, res: Response, next: NextFunction)
       prisma.campaign.count({ where: { status: 'active', ...(branchId ? { branchId } : {}), ...(campaignId ? { id: campaignId } : {}) } }),
       prisma.callLog.groupBy({ by: ['agentId'], where: currentCallWhere, _count: { agentId: true } }),
       prisma.callLog.groupBy({ by: ['agentId'], where: previousCallWhere, _count: { agentId: true } }),
-      prisma.lead.groupBy({ by: ['status'], where: currentLeadInventoryScope, _count: { status: true } }),
+      prisma.lead.groupBy({ by: ['status'], where: currentLeadScope, _count: { status: true } }),
       prisma.callLog.groupBy({ by: ['dispositionTag'], where: currentCallWhere, _count: { dispositionTag: true }, orderBy: { _count: { dispositionTag: 'desc' } } }),
       prisma.$queryRaw<Array<{ date: string; total: bigint; connected: bigint; callback: bigint; busy: bigint; noAnswer: bigint; talkSeconds: bigint }>>`
         SELECT

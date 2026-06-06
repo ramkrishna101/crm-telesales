@@ -183,7 +183,7 @@ export default function AdminDashboard() {
           </div>
 
           <div className="page-actions">
-            <DateRangeFilter value={dateRange} onChange={setDateRange} />
+            <DateRangeFilter value={dateRange} onChange={setDateRange} includeAllTime allTimeLabel="All Data" />
             <div style={{ minWidth: 220 }}>
               <Dropdown
                 value={campaignFilter}
