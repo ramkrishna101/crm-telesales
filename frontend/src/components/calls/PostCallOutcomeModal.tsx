@@ -227,13 +227,27 @@ export default function PostCallOutcomeModal() {
       qc.invalidateQueries({ queryKey: ['agent-dashboard'] });
       qc.invalidateQueries({ queryKey: ['lead-history'] });
       qc.invalidateQueries({ queryKey: ['lead-details'] });
-      stringeeService.dismissOutcome();
-      stringeeService.dismiss();
     },
     onError: (err) => {
-      toast.error(err instanceof Error ? err.message : 'Failed to log call');
+      toast.error(err instanceof Error ? err.message : 'Failed to log call', { duration: 6000 });
     },
   });
+
+  // Validate synchronously, close the popup right away, and let the log
+  // request complete in the background so the agent never waits on the network.
+  const handleSaveOutcome = () => {
+    if (!dispositionTag) {
+      toast.error('Call Result is required');
+      return;
+    }
+    if (!language) {
+      toast.error('Language is required');
+      return;
+    }
+    logMutation.mutate();
+    stringeeService.dismissOutcome();
+    stringeeService.dismiss();
+  };
 
   const handleRedial = () => {
     stringeeService.dismissOutcome();
@@ -448,7 +462,7 @@ export default function PostCallOutcomeModal() {
             <Phone size={14} /> Redial
           </button>
           <button
-            onClick={() => logMutation.mutate()}
+            onClick={handleSaveOutcome}
             disabled={logMutation.isPending || !dispositionTag || !language}
             className={isMobile ? 'agent-mobile-outcome-sheet__primary' : undefined}
             style={{

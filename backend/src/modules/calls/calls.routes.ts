@@ -43,17 +43,17 @@ router.post('/', async (req: Request, res: Response, next: NextFunction) => {
     const resolvedLanguage = body.language || parsedLanguageMatch?.[1]?.trim() || undefined;
 
     // Verify the lead is assigned to this agent (or admin/supervisor can log too)
-    const lead = await prisma.lead.findUnique({ where: { id: body.leadId } });
+    // and the disposition tag exists — run both lookups in parallel.
+    const [lead, tagExists] = await Promise.all([
+      prisma.lead.findUnique({ where: { id: body.leadId } }),
+      prisma.dispositionTag.findUnique({ where: { name: body.dispositionTag } }),
+    ]);
     if (!lead) throw new AppError(404, 'LEAD_NOT_FOUND', 'Lead not found');
 
     if (req.user!.role === 'agent' && lead.assignedToId !== agentId) {
       throw new AppError(403, 'FORBIDDEN', 'This lead is not assigned to you');
     }
 
-    // Verify disposition tag exists
-    const tagExists = await prisma.dispositionTag.findUnique({
-      where: { name: body.dispositionTag },
-    });
     if (!tagExists) throw new AppError(400, 'INVALID_TAG', `Disposition tag "${body.dispositionTag}" does not exist`);
 
     if (!body.isManual && body.durationSeconds === 0 && !body.telephonyRef) {

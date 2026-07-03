@@ -20,11 +20,13 @@ import agentRoutes from './modules/agent/agent.routes';
 import adminRoutes from './modules/admin/admin.routes';
 import stringeeRoutes from './modules/stringee/stringee.routes';
 import stringeePortalConfigsRoutes from './modules/stringee/stringeePortalConfigs.routes';
+import whatsappRoutes from './modules/whatsapp/whatsapp.routes';
 import { startLeadUploadWorker } from './jobs/leadUpload.worker';
 import { startFollowUpReminderJob } from './jobs/followUpReminder.job';
 import { verifyAccessToken } from './lib/jwt';
 import { prisma } from './lib/prisma';
 import { redis } from './lib/redis';
+import { bootstrapWhatsAppSessions } from './lib/whatsapp';
 
 const DEFAULT_BRANCH_CODE = 'primary';
 const HEALTHCHECK_TIMEOUT_MS = 1000;
@@ -188,6 +190,7 @@ app.use('/api/agent', agentRoutes);
 app.use('/api/admin', adminRoutes);
 app.use('/api/stringee', stringeeRoutes);
 app.use('/api/stringee-portals', stringeePortalConfigsRoutes);
+app.use('/api/whatsapp', whatsappRoutes);
 // TODO (Task 2.x): app.use('/api/analytics', analyticsRoutes);
 
 // ── Static Frontend Serving (Unified Deployment) ───────────────────────
@@ -217,6 +220,13 @@ httpServer.listen(PORT, async () => {
   // Start background workers
   startLeadUploadWorker();
   startFollowUpReminderJob(io);
+
+  try {
+    await bootstrapWhatsAppSessions();
+    console.log('✅ WhatsApp sessions bootstrapped for assigned phone slots');
+  } catch (err) {
+    console.error('❌ Failed to bootstrap WhatsApp sessions:', err);
+  }
 
   // Force provision/reset admin user (to resolve login lockouts)
   try {

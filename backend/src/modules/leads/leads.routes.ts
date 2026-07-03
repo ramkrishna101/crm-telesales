@@ -313,6 +313,47 @@ router.get('/', async (req: Request, res: Response, next: NextFunction) => {
   }
 });
 
+// ── GET /api/leads/by-phone/:phone ────────────────────────────────────
+// Resolve a phone number (e.g. from a WhatsApp chat) to a lead so the
+// agent can launch the same Stringee call + outcome flow as My Leads.
+
+router.get('/by-phone/:phone', async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const raw = param(req, 'phone');
+    const digits = raw.replace(/[^0-9]/g, '');
+    if (digits.length < 7) throw new AppError(400, 'INVALID_PHONE', 'Invalid phone number');
+    const suffix = digits.slice(-10);
+    const { role: callerRole, userId } = req.user!;
+
+    const rows = await prisma.$queryRaw<Array<{ id: string; name: string | null; assignedToId: string | null; branchId: string }>>`
+      SELECT id, name, "assignedToId", "branchId"
+      FROM leads
+      WHERE "deletedAt" IS NULL
+        AND regexp_replace(phone, '[^0-9]', '', 'g') LIKE ${'%' + suffix}
+      ORDER BY "createdAt" DESC
+      LIMIT 10
+    `;
+
+    let candidates = rows;
+    if (callerRole === 'agent') {
+      candidates = rows.filter((row) => row.assignedToId === userId);
+      if (!candidates.length && rows.length) {
+        throw new AppError(403, 'FORBIDDEN', 'A lead exists with this number but is not assigned to you');
+      }
+    } else if (!isSuperAdmin(callerRole)) {
+      const branchId = getUserBranchId(req.user!);
+      candidates = rows.filter((row) => row.branchId === branchId);
+    }
+
+    const lead = candidates[0];
+    if (!lead) throw new AppError(404, 'LEAD_NOT_FOUND', 'No lead found with this phone number');
+
+    res.json({ success: true, data: { id: lead.id, name: lead.name } });
+  } catch (err) {
+    next(err);
+  }
+});
+
 // ── GET /api/leads/:id/call-target ───────────────────────────────────
 
 router.get('/:id/call-target', async (req: Request, res: Response, next: NextFunction) => {
@@ -588,21 +629,22 @@ router.put('/:id/call-result', async (req: Request, res: Response, next: NextFun
       dispositionTag: z.string().min(1).max(50),
     }).parse(req.body);
 
-    const lead = await prisma.lead.findFirst({ where: { id, deletedAt: null } });
+    const [lead, tag, latestCallLog] = await Promise.all([
+      prisma.lead.findFirst({ where: { id, deletedAt: null } }),
+      prisma.dispositionTag.findUnique({ where: { name: dispositionTag } }),
+      prisma.callLog.findFirst({
+        where: { leadId: id },
+        orderBy: { calledAt: 'desc' },
+        select: { id: true },
+      }),
+    ]);
     if (!lead) throw new AppError(404, 'LEAD_NOT_FOUND', 'Lead not found');
 
     if (req.user!.role === 'agent' && lead.assignedToId !== req.user!.userId) {
       throw new AppError(403, 'FORBIDDEN', 'This lead is not assigned to you');
     }
 
-    const tag = await prisma.dispositionTag.findUnique({ where: { name: dispositionTag } });
     if (!tag) throw new AppError(400, 'INVALID_TAG', `Disposition tag "${dispositionTag}" does not exist`);
-
-    const latestCallLog = await prisma.callLog.findFirst({
-      where: { leadId: id },
-      orderBy: { calledAt: 'desc' },
-      select: { id: true },
-    });
 
     const updated = latestCallLog
       ? await prisma.callLog.update({

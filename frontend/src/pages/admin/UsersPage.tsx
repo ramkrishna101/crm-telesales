@@ -1,11 +1,12 @@
 import { useEffect, useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { usersService, teamsService, stringeePortalConfigsService } from '../../services/crm.service';
+import { usersService, teamsService, stringeePortalConfigsService, whatsappService } from '../../services/crm.service';
 import AppLayout from '../../components/layout/AppLayout';
 import ConfirmDialog from '../../components/ui/ConfirmDialog';
 import { useAuthStore } from '../../store/authStore';
+import QRCode from 'qrcode';
 import toast from 'react-hot-toast';
-import { Plus, RefreshCw, Search, UserX, UserCheck, Edit2, X, Key, Clock, Trash2 } from 'lucide-react';
+import { Plus, RefreshCw, Search, UserX, UserCheck, Edit2, X, Key, Clock, Trash2, MessageSquare, QrCode } from 'lucide-react';
 
 const USERS_PAGE_SIZE = 10;
 
@@ -340,6 +341,101 @@ function BreakHistoryModal({
   );
 }
 
+function WhatsAppScanModal({
+  user,
+  isLoading,
+  result,
+  onRefresh,
+  onClose,
+}: {
+  user: User;
+  isLoading: boolean;
+  result: any;
+  onRefresh: () => void;
+  onClose: () => void;
+}) {
+  const slot = result?.data?.data?.slot;
+  const qrPayload = result?.data?.data?.qrPayload || slot?.session?.qrPayload;
+  const state = result?.data?.data?.state || slot?.session?.state || 'qr_ready';
+  const [qrImage, setQrImage] = useState<string>('');
+
+  useEffect(() => {
+    let cancelled = false;
+    if (!qrPayload) {
+      setQrImage('');
+      return;
+    }
+
+    QRCode.toDataURL(qrPayload, {
+      errorCorrectionLevel: 'M',
+      margin: 1,
+      width: 220,
+      color: {
+        dark: '#111827',
+        light: '#ffffff',
+      },
+    })
+      .then((dataUrl: string) => {
+        if (!cancelled) setQrImage(dataUrl);
+      })
+      .catch(() => {
+        if (!cancelled) setQrImage('');
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [qrPayload]);
+
+  return (
+    <div className="modal-overlay" onClick={onClose}>
+      <div className="modal" onClick={(e) => e.stopPropagation()} style={{ maxWidth: 560 }}>
+        <div className="modal-header">
+          <h2 className="modal-title">WhatsApp Scan: {user.name}</h2>
+          <button className="btn-icon" onClick={onClose}><X size={18} /></button>
+        </div>
+        <div className="modal-body">
+          {isLoading ? (
+            <div className="empty-state"><RefreshCw className="spin" size={20} /><p>Preparing slot…</p></div>
+          ) : (
+            <>
+              <div className="card" style={{ marginBottom: 16 }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 8 }}>
+                  <QrCode size={18} />
+                  <strong>{state.toUpperCase()}</strong>
+                </div>
+                <p style={{ color: 'var(--text-secondary)', margin: 0 }}>
+                  Open WhatsApp on your phone: Settings → Linked devices → Link a device, then scan this code.
+                  {' '}If WhatsApp says invalid, refresh to get a fresh QR.
+                </p>
+              </div>
+              <div className="card" style={{ marginBottom: 16, display: 'grid', placeItems: 'center', minHeight: 260 }}>
+                {qrImage ? (
+                  <img src={qrImage} alt="WhatsApp QR code" style={{ width: 220, height: 220, imageRendering: 'pixelated' }} />
+                ) : (
+                  <p style={{ color: 'var(--text-secondary)', margin: 0 }}>
+                    {qrPayload ? 'Generating QR image…' : 'QR is not available yet.'}
+                  </p>
+                )}
+              </div>
+              <div className="card" style={{ background: '#0f172a', color: '#e2e8f0' }}>
+                <div style={{ fontSize: 12, opacity: 0.8, marginBottom: 8 }}>QR Payload</div>
+                <div style={{ wordBreak: 'break-all', fontFamily: 'monospace', fontSize: 12 }}>
+                  {qrPayload || 'No QR payload returned yet.'}
+                </div>
+              </div>
+            </>
+          )}
+        </div>
+        <div className="modal-footer">
+          <button className="btn btn-secondary" onClick={onRefresh} disabled={isLoading}>Refresh QR</button>
+          <button className="btn btn-secondary" onClick={onClose}>Close</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // ── Users Page ────────────────────────────────────────────────────────
 
 export default function UsersPage() {
@@ -351,6 +447,7 @@ export default function UsersPage() {
   const [editUser, setEditUser] = useState<User | null>(null);
   const [resetUser, setResetUser] = useState<User | null>(null);
   const [breakUser, setBreakUser] = useState<User | null>(null);
+  const [whatsappUser, setWhatsappUser] = useState<User | null>(null);
   const [deleteUser, setDeleteUser] = useState<User | null>(null);
   const [showCreate, setShowCreate] = useState(false);
 
@@ -404,6 +501,15 @@ export default function UsersPage() {
       setResetUser(null);
     },
     onError: (e: any) => toast.error(apiErr(e, 'Failed to reset password')),
+  });
+
+  const whatsappScanMutation = useMutation({
+    mutationFn: (userId: string) => whatsappService.scanUser(userId),
+    onSuccess: (res) => {
+      qc.invalidateQueries({ queryKey: ['whatsapp-slots'] });
+      toast.success(res.data?.data?.message || 'WhatsApp slot prepared');
+    },
+    onError: (e: any) => toast.error(apiErr(e, 'Failed to prepare WhatsApp slot')),
   });
 
   const users: User[] = usersData?.data?.data?.users || [];
@@ -503,6 +609,16 @@ export default function UsersPage() {
                 {new Date(u.createdAt).toLocaleDateString()}
               </div>
               <div className="table-cell" style={{ display: 'flex', gap: 4 }}>
+                <button
+                  className="btn-icon"
+                  title="Prepare WhatsApp slot"
+                  onClick={() => {
+                    setWhatsappUser(u);
+                    whatsappScanMutation.mutate(u.id);
+                  }}
+                >
+                  <MessageSquare size={15} />
+                </button>
                 <button className="btn-icon" title="Edit" onClick={() => setEditUser(u)}><Edit2 size={15} /></button>
                 <button className="btn-icon" title="Reset Password" onClick={() => setResetUser(u)}><Key size={15} /></button>
                 {u.role === 'agent' && (
@@ -576,6 +692,19 @@ export default function UsersPage() {
         <BreakHistoryModal
           user={breakUser}
           onClose={() => setBreakUser(null)}
+        />
+      )}
+
+      {whatsappUser && (
+        <WhatsAppScanModal
+          user={whatsappUser}
+          isLoading={whatsappScanMutation.isPending}
+          result={whatsappScanMutation.data}
+          onRefresh={() => whatsappScanMutation.mutate(whatsappUser.id)}
+          onClose={() => {
+            setWhatsappUser(null);
+            whatsappScanMutation.reset();
+          }}
         />
       )}
 

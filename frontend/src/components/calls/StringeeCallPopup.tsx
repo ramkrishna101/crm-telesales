@@ -358,6 +358,7 @@ export default function StringeeCallPopup() {
                 color: '#5b8def',
                 fontSize: 12,
                 fontWeight: 800,
+                visibility: state.activeLeadId ? 'visible' : 'hidden',
                     cursor: 'pointer',
                 boxShadow: '0 8px 18px rgba(24, 33, 77, 0.06)',
               }}

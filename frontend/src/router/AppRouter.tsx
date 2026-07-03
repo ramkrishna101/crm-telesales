@@ -28,6 +28,7 @@ import AnalyticsPage from '../pages/admin/AnalyticsPage';
 import BranchesPage from '../pages/admin/BranchesPage';
 import ConfigurationPage from '../pages/admin/ConfigurationPage';
 import AdminCallsPage from '../pages/admin/AdminCallsPage';
+import AdminWhatsAppPage from '../pages/admin/WhatsAppPage';
 
 // Supervisor
 import SupervisorDashboard from '../pages/supervisor/SupervisorDashboard';
@@ -39,6 +40,7 @@ import AgentLeadProfilePage from '../pages/agent/AgentLeadProfilePage';
 import AgentFollowUpsPage from '../pages/agent/AgentFollowUpsPage';
 import AgentCallsPage from '../pages/agent/AgentCallsPage';
 import AgentProfilePage from '../pages/agent/AgentProfilePage';
+import AgentWhatsAppPage from '../pages/agent/AgentWhatsAppPage';
 
 export default function AppRouter() {
   const { _hasHydrated } = useAuthStore();
@@ -70,6 +72,7 @@ export default function AppRouter() {
         <Route path="/admin/campaigns" element={<CampaignsPage />} />
         <Route path="/admin/leads" element={<LeadsPage />} />
         <Route path="/admin/calls" element={<AdminCallsPage />} />
+        <Route path="/admin/whatsapp" element={<AdminWhatsAppPage />} />
         <Route path="/admin/tags" element={<TagsPage />} />
         <Route path="/admin/analytics" element={<AnalyticsPage />} />
         {/* Fallback for unbuilt sub-pages */}
@@ -88,6 +91,7 @@ export default function AppRouter() {
         <Route path="/agent/leads" element={<AgentViewportBoundary desktop={<AgentLeadsPage />} />} />
         <Route path="/agent/leads/:leadId" element={<AgentViewportBoundary desktop={<AgentLeadsPage />} mobile={<AgentLeadProfilePage />} />} />
         <Route path="/agent/follow-ups" element={<AgentViewportBoundary desktop={<AgentFollowUpsPage />} />} />
+        <Route path="/agent/whatsapp" element={<AgentViewportBoundary desktop={<AgentWhatsAppPage />} />} />
         <Route path="/agent/calls" element={<AgentViewportBoundary desktop={<AgentCallsPage />} />} />
         <Route path="/agent/profile" element={<AgentViewportBoundary desktop={<AgentProfilePage />} />} />
         <Route path="/agent/*" element={<AgentViewportBoundary desktop={<AgentDashboard />} />} />

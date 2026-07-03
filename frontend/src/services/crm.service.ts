@@ -83,6 +83,7 @@ export const leadsService = {
   get: (id: string) => api.get(`/leads/${id}`),
   getPhone: (id: string) => api.get(`/leads/${id}/phone`),
   getCallTarget: (id: string) => api.get(`/leads/${id}/call-target`),
+  lookupByPhone: (phone: string) => api.get(`/leads/by-phone/${encodeURIComponent(phone)}`),
   upload: (campaignId: string, file: File) => {
     const form = new FormData();
     form.append('file', file);
@@ -120,6 +121,46 @@ export const callsService = {
 
 export const adminService = {
   dashboard: (params?: Record<string, string>) => api.get('/admin/dashboard', { params }),
+};
+
+// ── WhatsApp ─────────────────────────────────────────────────────────
+export const whatsappService = {
+  me: () => api.get('/whatsapp/me'),
+  listSlots: () => api.get('/whatsapp/slots'),
+  scanUser: (userId: string) => api.post(`/whatsapp/users/${userId}/scan`),
+  myConversations: () => api.get('/whatsapp/me/conversations'),
+  myMessages: (jid: string) => api.get(`/whatsapp/me/conversations/${encodeURIComponent(jid)}/messages`),
+  sendMyPayload: (payload: Record<string, unknown>) => api.post('/whatsapp/me/send', payload),
+  broadcastMyPayload: (payload: Record<string, unknown>) => api.post('/whatsapp/me/broadcast', payload),
+  forwardMyMessage: (messageId: string, toJid: string) =>
+    api.post(`/whatsapp/me/messages/${encodeURIComponent(messageId)}/forward`, { toJid }),
+  deleteMyMessage: (messageId: string, jid: string) =>
+    api.post(`/whatsapp/me/messages/${encodeURIComponent(messageId)}/delete`, { jid }),
+  editMyMessage: (messageId: string, jid: string, text: string) =>
+    api.post(`/whatsapp/me/messages/${encodeURIComponent(messageId)}/edit`, { jid, text }),
+  markMyChatRead: (jid: string) =>
+    api.post(`/whatsapp/me/chats/${encodeURIComponent(jid)}/read`, {}),
+  sendMyPresence: (jid: string, state: string) =>
+    api.post(`/whatsapp/me/chats/${encodeURIComponent(jid)}/presence`, { state }),
+  getChatPresence: (jid: string) =>
+    api.get(`/whatsapp/me/chats/${encodeURIComponent(jid)}/presence`),
+  getChatAvatar: (jid: string) =>
+    api.get(`/whatsapp/me/chats/${encodeURIComponent(jid)}/avatar`),
+  getChatPhone: (jid: string) =>
+    api.get(`/whatsapp/me/chats/${encodeURIComponent(jid)}/phone`),
+  sendMyMessage: (jid: string, text: string) => api.post('/whatsapp/me/messages', { jid, text }),
+  // Let browser/axios set multipart boundary automatically.
+  sendMyAttachment: (data: FormData) => api.post('/whatsapp/me/attachments', data),
+  getMessageMedia: (messageId: string) =>
+    api.get(`/whatsapp/me/messages/${encodeURIComponent(messageId)}/media`, { responseType: 'blob' }),
+  getChatHistory: (jid: string, before: string) =>
+    api.get(`/whatsapp/me/conversations/${encodeURIComponent(jid)}/history`, { params: { before, limit: 50 } }),
+  reassignSlot: (slotId: string, userId: string) =>
+    api.post(`/whatsapp/slots/${slotId}/reassign`, { userId }),
+  reconnectSlot: (slotId: string) => api.post(`/whatsapp/slots/${slotId}/reconnect`),
+  terminateSlot: (slotId: string) => api.post(`/whatsapp/slots/${slotId}/terminate`),
+  setSlotHidePhone: (slotId: string, hidePhone: boolean) =>
+    api.post(`/whatsapp/slots/${slotId}/hide-phone`, { hidePhone }),
 };
 
 // ── Tags ──────────────────────────────────────────────────────────────

@@ -78,6 +78,7 @@ model Branch {
   updatedAt     DateTime     @updatedAt
 
   users         User[]
+  whatsappPhoneSlots WhatsAppPhoneSlot[]
   stringeePortalConfigs StringeePortalConfig[]
   teams         Team[]
   campaigns     Campaign[]
@@ -137,8 +138,66 @@ model User {
   createdTags       DispositionTag[]
   breakLogs         BreakLog[]
   comments          LeadComment[]
+  whatsappPhoneSlot WhatsAppPhoneSlot? @relation("WhatsAppPhoneSlotAssignment")
 
   @@map("users")
+}
+
+model WhatsAppPhoneSlot {
+  id           String             @id @default(uuid())
+  branch       Branch             @relation(fields: [branchId], references: [id])
+  branchId     String
+  displayName  String
+  e164         String?
+  status       String             @default("idle")
+  hidePhone    Boolean            @default(false)
+  assignedTo   User?              @relation("WhatsAppPhoneSlotAssignment", fields: [assignedToId], references: [id], onDelete: SetNull)
+  assignedToId String?            @unique
+  lastSeenAt   DateTime?
+  createdAt    DateTime           @default(now())
+  updatedAt    DateTime           @updatedAt
+
+  session      WhatsAppSession?
+  messages     WhatsAppMessage[]
+
+  @@index([branchId])
+  @@index([status])
+  @@map("whatsapp_phone_slots")
+}
+
+model WhatsAppMessage {
+  id          String            @id @default(uuid())
+  slot        WhatsAppPhoneSlot @relation(fields: [slotId], references: [id], onDelete: Cascade)
+  slotId      String
+  messageId   String
+  jid         String
+  fromMe      Boolean           @default(false)
+  text        String?
+  mediaType   String?
+  timestamp   DateTime
+  createdAt   DateTime          @default(now())
+
+  @@unique([slotId, messageId])
+  @@index([slotId, jid])
+  @@index([slotId, timestamp])
+  @@map("whatsapp_messages")
+}
+
+model WhatsAppSession {
+  id              String               @id @default(uuid())
+  slot            WhatsAppPhoneSlot    @relation(fields: [slotId], references: [id], onDelete: Cascade)
+  slotId          String               @unique
+  state           String               @default("created")
+  qrPayload       String?
+  qrExpiresAt     DateTime?
+  lastHeartbeatAt DateTime?
+  reconnectCount  Int                  @default(0)
+  authBlobEnc     String?
+  createdAt       DateTime             @default(now())
+  updatedAt       DateTime             @updatedAt
+
+  @@index([state])
+  @@map("whatsapp_sessions")
 }
 
 model StringeePortalConfig {

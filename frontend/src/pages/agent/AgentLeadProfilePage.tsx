@@ -97,43 +97,87 @@ export default function AgentLeadProfilePage() {
 
   const addCommentMutation = useMutation({
     mutationFn: (content: string) => leadsService.addComment(leadId, content),
+    onMutate: () => {
+      setNewComment('');
+    },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['lead-details', leadId] });
       toast.success('Comment added successfully');
-      setNewComment('');
     },
     onError: () => toast.error('Failed to save comment'),
   });
 
   const updateStatusMutation = useMutation({
     mutationFn: (status: string) => leadsService.updateStatus(leadId, status),
+    onMutate: async (status) => {
+      await qc.cancelQueries({ queryKey: ['lead-details', leadId] });
+      const previous = qc.getQueryData(['lead-details', leadId]);
+      qc.setQueryData(['lead-details', leadId], (old: any) =>
+        old ? { ...old, data: { ...old.data, data: { ...old.data.data, status } } } : old);
+      return { previous };
+    },
     onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ['lead-details', leadId] });
-      qc.invalidateQueries({ queryKey: ['agent-leads'] });
       toast.success('Follow-up status updated');
     },
-    onError: () => toast.error('Failed to update follow-up status'),
+    onError: (_err, _vars, ctx: any) => {
+      if (ctx?.previous) qc.setQueryData(['lead-details', leadId], ctx.previous);
+      toast.error('Failed to update follow-up status');
+    },
+    onSettled: () => {
+      qc.invalidateQueries({ queryKey: ['lead-details', leadId] });
+      qc.invalidateQueries({ queryKey: ['agent-leads'] });
+    },
   });
 
   const updateCallResultMutation = useMutation({
     mutationFn: (dispositionTag: string) => leadsService.updateCallResult(leadId, dispositionTag),
+    onMutate: async (dispositionTag) => {
+      await qc.cancelQueries({ queryKey: ['lead-details', leadId] });
+      const previous = qc.getQueryData(['lead-details', leadId]);
+      qc.setQueryData(['lead-details', leadId], (old: any) => {
+        if (!old) return old;
+        const lead = old.data.data;
+        const callLogs = Array.isArray(lead.callLogs) && lead.callLogs.length
+          ? [{ ...lead.callLogs[0], dispositionTag }, ...lead.callLogs.slice(1)]
+          : lead.callLogs;
+        return { ...old, data: { ...old.data, data: { ...lead, callLogs } } };
+      });
+      return { previous };
+    },
     onSuccess: () => {
+      toast.success('Call result updated');
+    },
+    onError: (error: any, _vars, ctx: any) => {
+      if (ctx?.previous) qc.setQueryData(['lead-details', leadId], ctx.previous);
+      toast.error(error?.response?.data?.error?.message || 'Failed to update call result');
+    },
+    onSettled: () => {
       qc.invalidateQueries({ queryKey: ['lead-details', leadId] });
       qc.invalidateQueries({ queryKey: ['lead-history', leadId] });
       qc.invalidateQueries({ queryKey: ['agent-leads'] });
-      toast.success('Call result updated');
     },
-    onError: (error: any) => toast.error(error?.response?.data?.error?.message || 'Failed to update call result'),
   });
 
   const updateLanguageMutation = useMutation({
     mutationFn: (language: string) => leadsService.updateLanguage(leadId, language),
+    onMutate: async (language) => {
+      await qc.cancelQueries({ queryKey: ['lead-details', leadId] });
+      const previous = qc.getQueryData(['lead-details', leadId]);
+      qc.setQueryData(['lead-details', leadId], (old: any) =>
+        old ? { ...old, data: { ...old.data, data: { ...old.data.data, language } } } : old);
+      return { previous };
+    },
     onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ['lead-details', leadId] });
-      qc.invalidateQueries({ queryKey: ['agent-leads'] });
       toast.success('Language updated');
     },
-    onError: (error: any) => toast.error(error?.response?.data?.error?.message || 'Failed to update language'),
+    onError: (error: any, _vars, ctx: any) => {
+      if (ctx?.previous) qc.setQueryData(['lead-details', leadId], ctx.previous);
+      toast.error(error?.response?.data?.error?.message || 'Failed to update language');
+    },
+    onSettled: () => {
+      qc.invalidateQueries({ queryKey: ['lead-details', leadId] });
+      qc.invalidateQueries({ queryKey: ['agent-leads'] });
+    },
   });
 
   const lead = leadData?.data?.data;

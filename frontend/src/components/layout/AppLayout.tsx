@@ -6,7 +6,7 @@ import toast from 'react-hot-toast';
 import {
   LayoutDashboard, Users, Building2, PhoneCall,
   BarChart3, LogOut, ChevronRight, Bell,
-  UserCheck, FolderOpen, ListChecks, Tag, UserCircle2, Settings2
+  UserCheck, FolderOpen, ListChecks, Tag, UserCircle2, Settings2, MessageSquare
 } from 'lucide-react';
 
 interface NavItem { icon: React.ReactNode; label: string; to: string; }
@@ -19,6 +19,7 @@ const branchAdminNav: NavItem[] = [
   { icon: <UserCheck size={18} />, label: 'Users', to: '/admin/users' },
   { icon: <Building2 size={18} />, label: 'Teams', to: '/admin/teams' },
   { icon: <PhoneCall size={18} />, label: 'Calls', to: '/admin/calls' },
+  { icon: <MessageSquare size={18} />, label: 'WhatsApp', to: '/admin/whatsapp' },
   { icon: <Tag size={18} />, label: 'Disposition Tags', to: '/admin/tags' },
   { icon: <BarChart3 size={18} />, label: 'Analytics', to: '/admin/analytics' },
 ];
@@ -32,6 +33,7 @@ const superAdminNav: NavItem[] = [
   { icon: <UserCheck size={18} />, label: 'Users', to: '/admin/users' },
   { icon: <Building2 size={18} />, label: 'Teams', to: '/admin/teams' },
   { icon: <PhoneCall size={18} />, label: 'Calls', to: '/admin/calls' },
+  { icon: <MessageSquare size={18} />, label: 'WhatsApp', to: '/admin/whatsapp' },
   { icon: <Tag size={18} />, label: 'Disposition Tags', to: '/admin/tags' },
   { icon: <BarChart3 size={18} />, label: 'Analytics', to: '/admin/analytics' },
 ];
@@ -48,6 +50,7 @@ const agentNav: NavItem[] = [
   { icon: <LayoutDashboard size={18} />, label: 'Dashboard', to: '/agent' },
   { icon: <Users size={18} />, label: 'My Leads', to: '/agent/leads' },
   { icon: <ListChecks size={18} />, label: 'Follow-ups', to: '/agent/follow-ups' },
+  { icon: <MessageSquare size={18} />, label: 'WhatsApp', to: '/agent/whatsapp' },
   { icon: <PhoneCall size={18} />, label: 'Call History', to: '/agent/calls' },
 ];
 
@@ -55,6 +58,7 @@ const agentMobileNav: NavItem[] = [
   { icon: <LayoutDashboard size={18} />, label: 'Dashboard', to: '/agent' },
   { icon: <ListChecks size={18} />, label: 'Follow-ups', to: '/agent/follow-ups' },
   { icon: <Users size={18} />, label: 'My Leads', to: '/agent/leads' },
+  { icon: <MessageSquare size={18} />, label: 'WhatsApp', to: '/agent/whatsapp' },
   { icon: <PhoneCall size={18} />, label: 'Calls', to: '/agent/calls' },
   { icon: <UserCircle2 size={18} />, label: 'Profile', to: '/agent/profile' },
 ];

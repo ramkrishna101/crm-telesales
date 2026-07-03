@@ -9,7 +9,7 @@ import Dropdown from '../../components/ui/Dropdown';
 import MultiSelectDropdown from '../../components/ui/MultiSelectDropdown';
 import { 
   Search, User, Phone, Calendar, MessageSquare, 
-  ExternalLink, ChevronLeft, ChevronRight, Mail, Hash, Clock, History, PhoneCall, SlidersHorizontal, Languages, FileText, Copy, Check, X
+  ExternalLink, ChevronLeft, ChevronRight, Mail, Hash, Clock, History, PhoneCall, SlidersHorizontal, Languages, FileText, Copy, Check, X, MessageCircle
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { stringeeService } from '../../services/stringee.service';
@@ -453,6 +453,21 @@ export default function AgentLeadsPage() {
     }
   };
 
+  const handleWhatsApp = async (lead: Lead) => {
+    try {
+      const res = await leadsService.getPhone(lead.id);
+      let digits = String(res.data?.data?.phone || '').replace(/[^0-9]/g, '');
+      if (/^[6-9]\d{9}$/.test(digits)) digits = `91${digits}`;
+      if (!digits) {
+        toast.error('No phone number available for this lead');
+        return;
+      }
+      navigate(`/agent/whatsapp?phone=${digits}`);
+    } catch {
+      toast.error('Unable to open WhatsApp chat');
+    }
+  };
+
   const selectedLead = filteredLeads.find((lead) => lead.id === selectedLeadId) || filteredLeads[0] || null;
   const selectedLeadIndex = selectedLead ? filteredLeads.findIndex((lead) => lead.id === selectedLead.id) : -1;
 
@@ -593,6 +608,13 @@ export default function AgentLeadsPage() {
                       onClick={() => void handleCall(selectedLead)}
                     >
                       <PhoneCall size={14} /> {isActiveCall ? 'Calling' : 'Call'}
+                    </button>
+                    <button
+                      className="btn btn-secondary"
+                      style={{ color: '#16a34a', borderColor: '#16a34a55' }}
+                      onClick={() => void handleWhatsApp(selectedLead)}
+                    >
+                      <MessageCircle size={14} /> WhatsApp
                     </button>
                     <button
                       className="btn btn-secondary"
@@ -1168,6 +1190,19 @@ export default function AgentLeadsPage() {
                               <PhoneCall size={13} /> {isActiveCall ? 'Calling' : 'Call'}
                             </button>
                             <button
+                              title="Open WhatsApp chat"
+                              style={{
+                                display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+                                width: 30, height: 30,
+                                background: '#25d36618', color: '#16a34a',
+                                border: '1px solid #25d36655', borderRadius: 8,
+                                cursor: 'pointer',
+                              }}
+                              onClick={() => void handleWhatsApp(lead)}
+                            >
+                              <MessageCircle size={14} />
+                            </button>
+                            <button
                               style={{
                                 display: 'inline-flex', alignItems: 'center', gap: 6,
                                 padding: '7px 12px', fontSize: '0.8rem', fontWeight: 500,
@@ -1322,43 +1357,87 @@ function LeadDetailsModal({ leadId, onClose }: { leadId: string, onClose: () => 
 
   const addCommentMutation = useMutation({
     mutationFn: (content: string) => leadsService.addComment(leadId, content),
+    onMutate: () => {
+      setNewComment('');
+    },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['lead-details', leadId] });
       toast.success('Comment added successfully');
-      setNewComment('');
     },
     onError: () => toast.error('Failed to save comment')
   });
 
   const updateStatusMutation = useMutation({
     mutationFn: (status: string) => leadsService.updateStatus(leadId, status),
+    onMutate: async (status) => {
+      await qc.cancelQueries({ queryKey: ['lead-details', leadId] });
+      const previous = qc.getQueryData(['lead-details', leadId]);
+      qc.setQueryData(['lead-details', leadId], (old: any) =>
+        old ? { ...old, data: { ...old.data, data: { ...old.data.data, status } } } : old);
+      return { previous };
+    },
     onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ['lead-details', leadId] });
-      qc.invalidateQueries({ queryKey: ['agent-leads'] });
       toast.success('Follow-up status updated');
     },
-    onError: () => toast.error('Failed to update follow-up status'),
+    onError: (_err, _vars, ctx: any) => {
+      if (ctx?.previous) qc.setQueryData(['lead-details', leadId], ctx.previous);
+      toast.error('Failed to update follow-up status');
+    },
+    onSettled: () => {
+      qc.invalidateQueries({ queryKey: ['lead-details', leadId] });
+      qc.invalidateQueries({ queryKey: ['agent-leads'] });
+    },
   });
 
   const updateCallResultMutation = useMutation({
     mutationFn: (dispositionTag: string) => leadsService.updateCallResult(leadId, dispositionTag),
+    onMutate: async (dispositionTag) => {
+      await qc.cancelQueries({ queryKey: ['lead-details', leadId] });
+      const previous = qc.getQueryData(['lead-details', leadId]);
+      qc.setQueryData(['lead-details', leadId], (old: any) => {
+        if (!old) return old;
+        const lead = old.data.data;
+        const callLogs = Array.isArray(lead.callLogs) && lead.callLogs.length
+          ? [{ ...lead.callLogs[0], dispositionTag }, ...lead.callLogs.slice(1)]
+          : lead.callLogs;
+        return { ...old, data: { ...old.data, data: { ...lead, callLogs } } };
+      });
+      return { previous };
+    },
     onSuccess: () => {
+      toast.success('Call result updated');
+    },
+    onError: (error: any, _vars, ctx: any) => {
+      if (ctx?.previous) qc.setQueryData(['lead-details', leadId], ctx.previous);
+      toast.error(error?.response?.data?.error?.message || 'Failed to update call result');
+    },
+    onSettled: () => {
       qc.invalidateQueries({ queryKey: ['lead-details', leadId] });
       qc.invalidateQueries({ queryKey: ['lead-history', leadId] });
       qc.invalidateQueries({ queryKey: ['agent-leads'] });
-      toast.success('Call result updated');
     },
-    onError: (error: any) => toast.error(error?.response?.data?.error?.message || 'Failed to update call result'),
   });
 
   const updateLanguageMutation = useMutation({
     mutationFn: (language: string) => leadsService.updateLanguage(leadId, language),
+    onMutate: async (language) => {
+      await qc.cancelQueries({ queryKey: ['lead-details', leadId] });
+      const previous = qc.getQueryData(['lead-details', leadId]);
+      qc.setQueryData(['lead-details', leadId], (old: any) =>
+        old ? { ...old, data: { ...old.data, data: { ...old.data.data, language } } } : old);
+      return { previous };
+    },
     onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ['lead-details', leadId] });
-      qc.invalidateQueries({ queryKey: ['agent-leads'] });
       toast.success('Language updated');
     },
-    onError: (error: any) => toast.error(error?.response?.data?.error?.message || 'Failed to update language'),
+    onError: (error: any, _vars, ctx: any) => {
+      if (ctx?.previous) qc.setQueryData(['lead-details', leadId], ctx.previous);
+      toast.error(error?.response?.data?.error?.message || 'Failed to update language');
+    },
+    onSettled: () => {
+      qc.invalidateQueries({ queryKey: ['lead-details', leadId] });
+      qc.invalidateQueries({ queryKey: ['agent-leads'] });
+    },
   });
 
   const lead = leadData?.data?.data;

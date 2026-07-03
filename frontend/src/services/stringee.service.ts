@@ -620,13 +620,48 @@ class StringeeService {
     }
   };
 
+  // Opens the dialer popup for a raw phone number that has no lead record
+  // (e.g. an unknown WhatsApp contact). The call is placed the same way but
+  // no post-call outcome/log is produced because there is no lead to attach
+  // it to — finaliseCall() no-ops when activeLeadId is null.
+  startDirectCall = async (phone: string, displayName?: string): Promise<void> => {
+    if (
+      this.snapshot.callStatus === 'dialing' ||
+      this.snapshot.callStatus === 'ringing' ||
+      this.snapshot.callStatus === 'in_call'
+    ) {
+      throw new Error('Finish the active call before starting another one');
+    }
+
+    this.update({
+      visible: true,
+      error: null,
+      callStatus: 'idle',
+      activeLeadId: null,
+      activeLeadName: displayName || phone,
+      activePhone: phone,
+      elapsedSeconds: 0,
+      muted: false,
+      canMute: false,
+      lastCall: null,
+      showOutcome: false,
+    });
+
+    await Promise.all([
+      this.fetchHotlines(),
+      this.ensureConnected().catch((err) => {
+        this.update({ error: err instanceof Error ? err.message : 'Connection failed' });
+      }),
+    ]);
+  };
+
   // Commits the call using the agent-selected hotline. If the WebSocket is
   // not connected (broken / first call), we (re)authenticate transparently
   // before dialing. Falls back through remaining hotlines if Stringee
   // rejects the chosen one (CALL_NOT_ALLOWED_BY_YOUR_SERVER).
   placeCall = async (): Promise<void> => {
-    const { activeLeadId, activePhone, selectedHotline, hotlines } = this.snapshot;
-    if (!activeLeadId || !activePhone) throw new Error('No lead selected');
+    const { activePhone, selectedHotline, hotlines } = this.snapshot;
+    if (!activePhone) throw new Error('No number to call');
 
     if (
       this.snapshot.callStatus === 'dialing' ||
