@@ -11,10 +11,10 @@ ALTER TABLE "branches" ALTER COLUMN "updatedAt" DROP DEFAULT;
 ALTER TABLE "users" ALTER COLUMN "status" SET DEFAULT 'offline';
 
 -- AlterTable
-ALTER TABLE "whatsapp_phone_slots" ADD COLUMN "hidePhone" BOOLEAN NOT NULL DEFAULT false;
+ALTER TABLE "whatsapp_phone_slots" ADD COLUMN IF NOT EXISTS "hidePhone" BOOLEAN NOT NULL DEFAULT false;
 
 -- CreateTable
-CREATE TABLE "whatsapp_messages" (
+CREATE TABLE IF NOT EXISTS "whatsapp_messages" (
     "id" TEXT NOT NULL,
     "slotId" TEXT NOT NULL,
     "messageId" TEXT NOT NULL,
@@ -29,13 +29,20 @@ CREATE TABLE "whatsapp_messages" (
 );
 
 -- CreateIndex
-CREATE INDEX "whatsapp_messages_slotId_jid_idx" ON "whatsapp_messages"("slotId", "jid");
+CREATE INDEX IF NOT EXISTS "whatsapp_messages_slotId_jid_idx" ON "whatsapp_messages"("slotId", "jid");
 
 -- CreateIndex
-CREATE INDEX "whatsapp_messages_slotId_timestamp_idx" ON "whatsapp_messages"("slotId", "timestamp");
+CREATE INDEX IF NOT EXISTS "whatsapp_messages_slotId_timestamp_idx" ON "whatsapp_messages"("slotId", "timestamp");
 
 -- CreateIndex
-CREATE UNIQUE INDEX "whatsapp_messages_slotId_messageId_key" ON "whatsapp_messages"("slotId", "messageId");
+CREATE UNIQUE INDEX IF NOT EXISTS "whatsapp_messages_slotId_messageId_key" ON "whatsapp_messages"("slotId", "messageId");
 
 -- AddForeignKey
-ALTER TABLE "whatsapp_messages" ADD CONSTRAINT "whatsapp_messages_slotId_fkey" FOREIGN KEY ("slotId") REFERENCES "whatsapp_phone_slots"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_constraint WHERE conname = 'whatsapp_messages_slotId_fkey'
+  ) THEN
+    ALTER TABLE "whatsapp_messages" ADD CONSTRAINT "whatsapp_messages_slotId_fkey" FOREIGN KEY ("slotId") REFERENCES "whatsapp_phone_slots"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+  END IF;
+END $$;

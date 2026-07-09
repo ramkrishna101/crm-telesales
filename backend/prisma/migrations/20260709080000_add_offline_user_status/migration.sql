@@ -1,2 +1,2 @@
 -- AlterEnum
-ALTER TYPE "UserStatus" ADD VALUE 'offline';
+ALTER TYPE "UserStatus" ADD VALUE IF NOT EXISTS 'offline';

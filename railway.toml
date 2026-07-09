@@ -2,7 +2,7 @@
 builder = "DOCKERFILE"
 
 [deploy]
-preDeployCommand = ["/app/backend/node_modules/.bin/prisma migrate deploy --schema /app/backend/prisma/schema.prisma"]
+preDeployCommand = ["sh -c '/app/backend/node_modules/.bin/prisma migrate resolve --rolled-back 20260709080100_add_whatsapp_messages_and_sync_drift --schema /app/backend/prisma/schema.prisma || true'", "/app/backend/node_modules/.bin/prisma migrate deploy --schema /app/backend/prisma/schema.prisma"]
 healthcheckPath = "/health"
 healthcheckTimeout = 100
 restartPolicyType = "ON_FAILURE"
