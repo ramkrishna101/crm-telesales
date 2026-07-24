@@ -297,10 +297,19 @@ export async function exchangeStringeeXAgentToken(
     throw new Error(`StringeeX login failed (r=${json.r}): ${json.msg || 'unknown'}`);
   }
 
-  const portal = Array.isArray(json.portals) && json.portals.length ? json.portals[0] : null;
-  const authToken: string | undefined = portal?.auth_token || json.auth_token;
+  const portals = Array.isArray(json.portals) ? json.portals : [];
+  const portal = portals.find((entry: any) => entry?.auth_token || entry?.access_token || entry?.token) || portals[0] || null;
+  const authToken: string | undefined =
+    portal?.auth_token ||
+    portal?.access_token ||
+    portal?.token ||
+    json.auth_token ||
+    json.access_token ||
+    json.token ||
+    json?.data?.auth_token ||
+    json?.data?.access_token;
   if (!authToken) {
-    throw new Error('StringeeX login response did not include auth_token');
+    throw new Error('StringeeX login response did not include auth_token or access_token');
   }
 
   const accountId: string | null =

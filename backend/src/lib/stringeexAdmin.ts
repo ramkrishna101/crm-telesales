@@ -72,9 +72,18 @@ async function loginAndCacheToken(): Promise<string> {
     throw new Error(`StringeeX admin login failed (r=${json.r}): ${json.msg || 'unknown'}`);
   }
 
-  const portal = Array.isArray(json.portals) && json.portals.length ? json.portals[0] : null;
-  const token: string | undefined = portal?.auth_token || json.auth_token;
-  if (!token) throw new Error('StringeeX admin login did not return auth_token');
+  const portals = Array.isArray(json.portals) ? json.portals : [];
+  const portal = portals.find((entry: any) => entry?.auth_token || entry?.access_token || entry?.token) || portals[0] || null;
+  const token: string | undefined =
+    portal?.auth_token ||
+    portal?.access_token ||
+    portal?.token ||
+    json.auth_token ||
+    json.access_token ||
+    json.token ||
+    json?.data?.auth_token ||
+    json?.data?.access_token;
+  if (!token) throw new Error('StringeeX admin login did not return auth_token or access_token');
 
   await redis.setex(TOKEN_CACHE_KEY, TOKEN_TTL_SECONDS, token);
   return token;
