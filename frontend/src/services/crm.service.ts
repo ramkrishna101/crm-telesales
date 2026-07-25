@@ -184,8 +184,13 @@ export const followUpsService = {
 // ── Agent Workspace ───────────────────────────────────────────────────
 export const agentService = {
   dashboard: (params?: Record<string, string>) => api.get('/agent/dashboard', { params }),
-  nextLead: (campaignId?: string) =>
-    api.get('/agent/next-lead', { params: campaignId ? { campaignId } : {} }),
+  nextLead: (campaignId?: string, excludeLeadId?: string) =>
+    api.get('/agent/next-lead', {
+      params: {
+        ...(campaignId ? { campaignId } : {}),
+        ...(excludeLeadId ? { excludeLeadId } : {}),
+      },
+    }),
   breakStart: () => api.post('/users/me/break/start'),
   breakEnd: () => api.post('/users/me/break/end'),
   breakHistory: () => api.get('/agent/break-history'),

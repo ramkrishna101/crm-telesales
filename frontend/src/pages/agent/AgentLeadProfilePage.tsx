@@ -5,7 +5,7 @@ import { ArrowLeft, Calendar, Check, Copy, Hash, History, Languages, Mail, Messa
 import toast from 'react-hot-toast';
 import AppLayout from '../../components/layout/AppLayout';
 import Dropdown from '../../components/ui/Dropdown';
-import { callsService, leadsService, tagsService } from '../../services/crm.service';
+import { agentService, callsService, leadsService, tagsService } from '../../services/crm.service';
 
 const STATUS_COLORS: Record<string, { bg: string; fg: string; dot: string }> = {
   uncontacted: { bg: '#eef2f7', fg: '#475569', dot: '#94a3b8' },
@@ -59,6 +59,28 @@ export default function AgentLeadProfilePage() {
   const [statusDraft, setStatusDraft] = useState('');
   const [callResultDraft, setCallResultDraft] = useState('');
   const [languageDraft, setLanguageDraft] = useState('');
+  const [isStatusDirty, setIsStatusDirty] = useState(false);
+  const [isCallResultDirty, setIsCallResultDirty] = useState(false);
+  const [isLanguageDirty, setIsLanguageDirty] = useState(false);
+
+  const moveToNextLead = async () => {
+    try {
+      const campaignId = lead?.campaign?.id || lead?.campaignId;
+      const response = await agentService.nextLead(campaignId, leadId);
+      const nextLeadId = response?.data?.data?.lead?.id as string | undefined;
+
+      if (nextLeadId && nextLeadId !== leadId) {
+        navigate(`/agent/leads/${nextLeadId}`, { replace: true });
+        return;
+      }
+
+      toast('No more leads in queue');
+      navigate('/agent/leads', { replace: true });
+    } catch {
+      toast.error('Call result saved, but could not load next lead');
+      navigate('/agent/leads', { replace: true });
+    }
+  };
 
   const copyPhone = async () => {
     try {
@@ -118,6 +140,7 @@ export default function AgentLeadProfilePage() {
     },
     onSuccess: () => {
       toast.success('Follow-up status updated');
+      setIsStatusDirty(false);
     },
     onError: (_err, _vars, ctx: any) => {
       if (ctx?.previous) qc.setQueryData(['lead-details', leadId], ctx.previous);
@@ -144,8 +167,10 @@ export default function AgentLeadProfilePage() {
       });
       return { previous };
     },
-    onSuccess: () => {
+    onSuccess: async () => {
       toast.success('Call result updated');
+      setIsCallResultDirty(false);
+      await moveToNextLead();
     },
     onError: (error: any, _vars, ctx: any) => {
       if (ctx?.previous) qc.setQueryData(['lead-details', leadId], ctx.previous);
@@ -169,6 +194,7 @@ export default function AgentLeadProfilePage() {
     },
     onSuccess: () => {
       toast.success('Language updated');
+      setIsLanguageDirty(false);
     },
     onError: (error: any, _vars, ctx: any) => {
       if (ctx?.previous) qc.setQueryData(['lead-details', leadId], ctx.previous);
@@ -199,16 +225,16 @@ export default function AgentLeadProfilePage() {
   const hasLanguageChange = Boolean(languageDraft && languageDraft !== currentLanguage);
 
   useEffect(() => {
-    setStatusDraft(lead?.status || '');
-  }, [lead?.status]);
+    if (!isStatusDirty) setStatusDraft(lead?.status || '');
+  }, [isStatusDirty, lead?.status]);
 
   useEffect(() => {
-    setCallResultDraft(latestCallResult);
-  }, [latestCallResult]);
+    if (!isCallResultDirty) setCallResultDraft(latestCallResult);
+  }, [isCallResultDirty, latestCallResult]);
 
   useEffect(() => {
-    setLanguageDraft(currentLanguage);
-  }, [currentLanguage]);
+    if (!isLanguageDirty) setLanguageDraft(currentLanguage);
+  }, [currentLanguage, isLanguageDirty]);
 
   const statusTheme = useMemo(() => {
     const statusKey = (lead?.status || 'uncontacted') as keyof typeof STATUS_COLORS;
@@ -277,7 +303,7 @@ export default function AgentLeadProfilePage() {
                 </div>
                 <div className="agent-mobile-profile-hero__copy">
                   <h1 className="agent-mobile-section-title">{lead.name || 'Unknown'}</h1>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                  <div className="agent-mobile-profile-phone-row">
                     <div className="agent-mobile-lead-phone">{maskPhone(lead.phone)}</div>
                     <button
                       type="button"
@@ -293,6 +319,7 @@ export default function AgentLeadProfilePage() {
                         justifyContent: 'center',
                         padding: 0,
                         cursor: 'pointer',
+                        flexShrink: 0,
                       }}
                     >
                       <Copy size={14} />
@@ -314,14 +341,14 @@ export default function AgentLeadProfilePage() {
                     <div style={mobilePairGridStyle}>
                       <div className="agent-mobile-detail-label"><Phone size={14} /> Phone</div>
                       <div className="agent-mobile-detail-label">Follow-up Status</div>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: 8, minWidth: 0 }}>
-                        <div className="agent-mobile-detail-value">{maskPhone(lead.phone)}</div>
+                      <div className="agent-mobile-phone-cell">
+                        <div className="agent-mobile-detail-value agent-mobile-phone-cell__value">{maskPhone(lead.phone)}</div>
                         <button
                           type="button"
                           onClick={() => void copyPhone()}
                           aria-label="Copy phone number"
                           title="Copy phone number"
-                          style={{ border: 'none', background: 'transparent', color: '#94a3b8', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', padding: 0, cursor: 'pointer' }}
+                          style={{ border: 'none', background: 'transparent', color: '#94a3b8', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', padding: 0, cursor: 'pointer', flexShrink: 0 }}
                         >
                           <Copy size={14} />
                         </button>
@@ -330,7 +357,10 @@ export default function AgentLeadProfilePage() {
                         <div style={{ flex: 1, minWidth: 0 }}>
                           <Dropdown
                             value={statusDraft}
-                            onChange={setStatusDraft}
+                            onChange={(value) => {
+                              setIsStatusDirty(true);
+                              setStatusDraft(value);
+                            }}
                             options={FOLLOWUP_STATUS_OPTIONS.map((option) => ({ value: option.value, label: option.label }))}
                             placeholder="Status"
                             height={30}
@@ -355,7 +385,10 @@ export default function AgentLeadProfilePage() {
                             title="Reset follow-up status"
                             disabled={!hasStatusChange}
                             onClick={() => {
-                              if (hasStatusChange) setStatusDraft(lead.status || '');
+                              if (hasStatusChange) {
+                                setStatusDraft(lead.status || '');
+                                setIsStatusDirty(false);
+                              }
                             }}
                             style={{ ...mobileActionButtonStyle, background: '#f1f5f9', color: '#64748b', cursor: hasStatusChange ? 'pointer' : 'default', opacity: hasStatusChange ? 1 : 0, pointerEvents: hasStatusChange ? 'auto' : 'none' }}
                           >
@@ -374,7 +407,10 @@ export default function AgentLeadProfilePage() {
                         <div style={{ flex: 1, minWidth: 0 }}>
                           <Dropdown
                             value={callResultDraft}
-                            onChange={setCallResultDraft}
+                            onChange={(value) => {
+                              setIsCallResultDirty(true);
+                              setCallResultDraft(value);
+                            }}
                             options={dispositionTags.map((tag) => ({ value: tag.name, label: tag.name, colour: tag.color || undefined }))}
                             placeholder={showNewLeadState ? 'New Lead' : 'Select call result'}
                             height={30}
@@ -399,7 +435,10 @@ export default function AgentLeadProfilePage() {
                             title="Reset call result"
                             disabled={!hasCallResultChange}
                             onClick={() => {
-                              if (hasCallResultChange) setCallResultDraft(latestCallResult);
+                              if (hasCallResultChange) {
+                                setCallResultDraft(latestCallResult);
+                                setIsCallResultDirty(false);
+                              }
                             }}
                             style={{ ...mobileActionButtonStyle, background: '#f1f5f9', color: '#64748b', cursor: hasCallResultChange ? 'pointer' : 'default', opacity: hasCallResultChange ? 1 : 0, pointerEvents: hasCallResultChange ? 'auto' : 'none' }}
                           >
@@ -418,7 +457,10 @@ export default function AgentLeadProfilePage() {
                         <div style={{ flex: 1, minWidth: 0 }}>
                           <Dropdown
                             value={languageDraft}
-                            onChange={setLanguageDraft}
+                            onChange={(value) => {
+                              setIsLanguageDirty(true);
+                              setLanguageDraft(value);
+                            }}
                             options={availableLanguageOptions.map((language) => ({ value: language, label: language }))}
                             placeholder="Select language"
                             height={30}
@@ -443,7 +485,10 @@ export default function AgentLeadProfilePage() {
                             title="Reset language"
                             disabled={!hasLanguageChange}
                             onClick={() => {
-                              if (hasLanguageChange) setLanguageDraft(currentLanguage);
+                              if (hasLanguageChange) {
+                                setLanguageDraft(currentLanguage);
+                                setIsLanguageDirty(false);
+                              }
                             }}
                             style={{ ...mobileActionButtonStyle, background: '#f1f5f9', color: '#64748b', cursor: hasLanguageChange ? 'pointer' : 'default', opacity: hasLanguageChange ? 1 : 0, pointerEvents: hasLanguageChange ? 'auto' : 'none' }}
                           >

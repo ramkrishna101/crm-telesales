@@ -60,7 +60,6 @@ const agentMobileNav: NavItem[] = [
   { icon: <Users size={18} />, label: 'My Leads', to: '/agent/leads' },
   { icon: <MessageSquare size={18} />, label: 'WhatsApp', to: '/agent/whatsapp' },
   { icon: <PhoneCall size={18} />, label: 'Calls', to: '/agent/calls' },
-  { icon: <UserCircle2 size={18} />, label: 'Profile', to: '/agent/profile' },
 ];
 
 const roleNavs = {
@@ -121,6 +120,15 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
             <span className={`ops-pill ${user?.status === 'on_break' ? 'ops-pill--warning' : 'ops-pill--success'}`}>
               {statusLabel}
             </span>
+            <NavLink
+              to="/agent/profile"
+              end
+              className={({ isActive }) => `agent-mobile-topbar__profile ${isActive ? 'agent-mobile-topbar__profile--active' : ''}`}
+              aria-label="Profile"
+              title="Profile"
+            >
+              <UserCircle2 size={18} />
+            </NavLink>
           </div>
         </div>
 

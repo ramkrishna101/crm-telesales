@@ -148,7 +148,7 @@ function parseDateAtEndOfDay(value: string) {
 router.get('/next-lead', requireRole('agent'), async (req: Request, res: Response, next: NextFunction) => {
   try {
     const agentId = req.user!.userId;
-    const { campaignId } = req.query as Record<string, string>;
+    const { campaignId, excludeLeadId } = req.query as Record<string, string>;
 
     // 1. Check for overdue follow-up lead
     const overdueFollowUp = await prisma.followUp.findFirst({
@@ -156,6 +156,7 @@ router.get('/next-lead', requireRole('agent'), async (req: Request, res: Respons
         agentId,
         status: 'pending',
         scheduledAt: { lte: new Date() },
+        ...(excludeLeadId ? { leadId: { not: excludeLeadId } } : {}),
       },
       orderBy: { scheduledAt: 'asc' },
       include: {
@@ -177,33 +178,52 @@ router.get('/next-lead', requireRole('agent'), async (req: Request, res: Respons
       });
     }
 
-    // 2. Next high-priority lead
+    // 2. New leads first (high priority, then normal), then callback queue.
     const baseWhere = {
       assignedToId: agentId,
-      status: { in: ['uncontacted', 'callback'] as never[] },
       isDnd: false,
+      ...(excludeLeadId ? { id: { not: excludeLeadId } } : {}),
       ...(campaignId ? { campaignId } : {}),
     };
 
-    const highPriority = await prisma.lead.findFirst({
-      where: { ...baseWhere, priority: 'high' },
-      orderBy: { lastCalledAt: 'asc' },
+    const highPriorityNewLead = await prisma.lead.findFirst({
+      where: { ...baseWhere, priority: 'high', status: 'uncontacted' },
+      orderBy: [{ lastCalledAt: { sort: 'asc', nulls: 'first' } }, { createdAt: 'asc' }],
       include: { campaign: { select: { id: true, name: true, script: true } } },
     });
 
-    if (highPriority) {
-      return res.json({ success: true, data: { type: 'lead', priority: 'high', lead: maskPhone(highPriority) } });
+    if (highPriorityNewLead) {
+      return res.json({ success: true, data: { type: 'lead', priority: 'high', lead: maskPhone(highPriorityNewLead) } });
     }
 
-    // 3. Normal priority lead
-    const normalLead = await prisma.lead.findFirst({
-      where: baseWhere,
-      orderBy: { createdAt: 'asc' },
+    const normalNewLead = await prisma.lead.findFirst({
+      where: { ...baseWhere, status: 'uncontacted' },
+      orderBy: [{ lastCalledAt: { sort: 'asc', nulls: 'first' } }, { createdAt: 'asc' }],
       include: { campaign: { select: { id: true, name: true, script: true } } },
     });
 
-    if (normalLead) {
-      return res.json({ success: true, data: { type: 'lead', priority: 'normal', lead: maskPhone(normalLead) } });
+    if (normalNewLead) {
+      return res.json({ success: true, data: { type: 'lead', priority: 'normal', lead: maskPhone(normalNewLead) } });
+    }
+
+    const highPriorityCallback = await prisma.lead.findFirst({
+      where: { ...baseWhere, priority: 'high', status: 'callback' },
+      orderBy: [{ lastCalledAt: { sort: 'asc', nulls: 'first' } }, { createdAt: 'asc' }],
+      include: { campaign: { select: { id: true, name: true, script: true } } },
+    });
+
+    if (highPriorityCallback) {
+      return res.json({ success: true, data: { type: 'lead', priority: 'high', lead: maskPhone(highPriorityCallback) } });
+    }
+
+    const normalCallback = await prisma.lead.findFirst({
+      where: { ...baseWhere, status: 'callback' },
+      orderBy: [{ lastCalledAt: { sort: 'asc', nulls: 'first' } }, { createdAt: 'asc' }],
+      include: { campaign: { select: { id: true, name: true, script: true } } },
+    });
+
+    if (normalCallback) {
+      return res.json({ success: true, data: { type: 'lead', priority: 'normal', lead: maskPhone(normalCallback) } });
     }
 
     return res.json({ success: true, data: null, message: 'No more leads available' });

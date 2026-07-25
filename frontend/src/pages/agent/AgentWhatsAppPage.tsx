@@ -743,6 +743,8 @@ export default function AgentWhatsAppPage() {
     }
   });
   const [chatFilter, setChatFilter] = useState<string>('all');
+  const [mobilePrimaryTab, setMobilePrimaryTab] = useState<'chats' | 'calls'>('chats');
+  const [mobileFrameHeight, setMobileFrameHeight] = useState<number | null>(null);
   const [chatTags, setChatTags] = useState<Record<string, string[]>>(() => {
     try {
       return JSON.parse(localStorage.getItem('wa-chat-tags') || '{}');
@@ -771,6 +773,7 @@ export default function AgentWhatsAppPage() {
   });
   const T = WA_THEMES[waTheme];
   const menuStyle: CSSProperties = { ...menuItemStyle, color: T.textPrimary };
+  const mobileFrameRef = useRef<HTMLDivElement | null>(null);
 
   const toggleWaTheme = () => {
     setWaTheme((current) => {
@@ -1086,6 +1089,38 @@ export default function AgentWhatsAppPage() {
     return () => window.removeEventListener('resize', onResize);
   }, []);
 
+  useEffect(() => {
+    if (!isMobile) {
+      setMobileFrameHeight(null);
+      return;
+    }
+
+    const recalcMobileFrame = () => {
+      const frameTop = mobileFrameRef.current?.getBoundingClientRect().top;
+      if (frameTop == null) return;
+
+      const viewportHeight = window.visualViewport?.height ?? window.innerHeight;
+      const dockElement = document.querySelector('.agent-mobile-dock') as HTMLElement | null;
+      const dockTop = dockElement?.getBoundingClientRect().top ?? viewportHeight;
+
+      const nextHeight = Math.max(300, Math.floor(dockTop - frameTop - 10));
+      setMobileFrameHeight(nextHeight);
+    };
+
+    recalcMobileFrame();
+    window.addEventListener('resize', recalcMobileFrame);
+    window.addEventListener('orientationchange', recalcMobileFrame);
+    window.visualViewport?.addEventListener('resize', recalcMobileFrame);
+    window.visualViewport?.addEventListener('scroll', recalcMobileFrame);
+
+    return () => {
+      window.removeEventListener('resize', recalcMobileFrame);
+      window.removeEventListener('orientationchange', recalcMobileFrame);
+      window.visualViewport?.removeEventListener('resize', recalcMobileFrame);
+      window.visualViewport?.removeEventListener('scroll', recalcMobileFrame);
+    };
+  }, [isMobile]);
+
   // Deep link from My Leads: /agent/whatsapp?phone=91XXXXXXXXXX opens (or
   // starts) the chat with that number, like tapping a contact in WhatsApp.
   useEffect(() => {
@@ -1095,6 +1130,7 @@ export default function AgentWhatsAppPage() {
     const jid = normalizePhoneToJid(phone);
     if (jid) {
       setSelectedJid(jid);
+      setMobilePrimaryTab('chats');
       setShowChatListOnMobile(false);
     }
     window.history.replaceState({}, '', window.location.pathname);
@@ -1761,17 +1797,25 @@ export default function AgentWhatsAppPage() {
         .wa-chat-row:hover .wa-pin-btn { opacity: 0.8; }
         .wa-pin-btn.pinned { opacity: 0.9; }
       `}</style>
-      <div className="page-container">
+      <div
+        ref={mobileFrameRef}
+        className="page-container"
+        style={isMobile ? { padding: 0, maxWidth: '100%', width: '100%', height: mobileFrameHeight ? `${mobileFrameHeight}px` : '100%', minHeight: 0, overflow: 'hidden', display: 'flex', flexDirection: 'column', flex: 1 } : undefined}
+      >
         <div
           className="card"
           style={{
             margin: 0,
             padding: 0,
             overflow: 'hidden',
-            borderRadius: 12,
+            borderRadius: isMobile ? 0 : 12,
             position: 'relative',
             background: T.outerBg,
-            minHeight: 'calc(100vh - 140px)',
+            minHeight: isMobile ? '100%' : 'calc(100vh - 140px)',
+            height: isMobile ? '100%' : undefined,
+            flex: isMobile ? 1 : undefined,
+            display: isMobile ? 'flex' : undefined,
+            flexDirection: isMobile ? 'column' : undefined,
           }}
         >
           <div
@@ -1780,7 +1824,7 @@ export default function AgentWhatsAppPage() {
               top: 0,
               left: 0,
               right: 0,
-              height: 112,
+              height: isMobile ? 96 : 112,
               background: T.stripBg,
               pointerEvents: 'none',
             }}
@@ -1795,11 +1839,12 @@ export default function AgentWhatsAppPage() {
               style={{
                 position: 'relative',
                 zIndex: 1,
-                margin: 16,
-                minHeight: 460,
-                borderRadius: 10,
+                margin: isMobile ? 0 : 16,
+                minHeight: isMobile ? '100%' : 460,
+                height: isMobile ? '100%' : undefined,
+                borderRadius: isMobile ? 0 : 10,
                 background: T.panelBg,
-                boxShadow: '0 6px 18px rgba(11,20,26,0.15)',
+                boxShadow: isMobile ? 'none' : '0 6px 18px rgba(11,20,26,0.15)',
                 display: 'grid',
                 placeItems: 'center',
                 padding: 32,
@@ -1825,14 +1870,17 @@ export default function AgentWhatsAppPage() {
           ) : slot ? (
             <div
               style={{
-                display: 'grid',
-                gridTemplateColumns: isMobile ? '1fr' : contactInfoOpen && activeJid ? '340px 1fr 300px' : '340px 1fr',
-                height: 'clamp(460px, calc(100vh - 190px), 760px)',
-                maxHeight: 'calc(100vh - 190px)',
-                margin: 16,
-                borderRadius: 10,
+                display: isMobile ? 'flex' : 'grid',
+                flexDirection: isMobile ? 'column' : undefined,
+                gridTemplateColumns: isMobile ? undefined : contactInfoOpen && activeJid ? '340px 1fr 300px' : '340px 1fr',
+                height: isMobile ? undefined : 'clamp(460px, calc(100vh - 190px), 760px)',
+                maxHeight: isMobile ? '100%' : 'calc(100vh - 190px)',
+                minHeight: 0,
+                flex: isMobile ? 1 : undefined,
+                margin: isMobile ? 0 : 16,
+                borderRadius: isMobile ? 0 : 10,
                 overflow: 'hidden',
-                boxShadow: '0 6px 18px rgba(11,20,26,0.15)',
+                boxShadow: isMobile ? 'none' : '0 6px 18px rgba(11,20,26,0.15)',
                 position: 'relative',
                 zIndex: 1,
               }}
@@ -1842,6 +1890,8 @@ export default function AgentWhatsAppPage() {
                   borderRight: `1px solid ${T.border}`,
                   overflow: 'hidden',
                   background: T.sidebarBg,
+                  height: isMobile ? undefined : undefined,
+                  flex: isMobile ? 1 : undefined,
                   display: isMobile && !showChatListOnMobile ? 'none' : 'flex',
                   flexDirection: 'column',
                   minHeight: 0,
@@ -1887,6 +1937,48 @@ export default function AgentWhatsAppPage() {
                     <MoreVertical size={16} />
                   </div>
                 </div>
+                {isMobile ? (
+                  <div style={{ background: T.headerBg, borderBottom: `1px solid ${T.border}`, display: 'grid', gridTemplateColumns: '1fr 1fr' }}>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setMobilePrimaryTab('chats');
+                        setShowChatListOnMobile(true);
+                      }}
+                      style={{
+                        border: 'none',
+                        background: 'transparent',
+                        color: mobilePrimaryTab === 'chats' ? '#00a884' : T.textSecondary,
+                        fontWeight: 700,
+                        letterSpacing: 0.4,
+                        fontSize: 13,
+                        padding: '12px 8px 10px',
+                        borderBottom: mobilePrimaryTab === 'chats' ? '2px solid #00a884' : '2px solid transparent',
+                      }}
+                    >
+                      CHATS
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setMobilePrimaryTab('calls');
+                        setShowChatListOnMobile(true);
+                      }}
+                      style={{
+                        border: 'none',
+                        background: 'transparent',
+                        color: mobilePrimaryTab === 'calls' ? '#00a884' : T.textSecondary,
+                        fontWeight: 700,
+                        letterSpacing: 0.4,
+                        fontSize: 13,
+                        padding: '12px 8px 10px',
+                        borderBottom: mobilePrimaryTab === 'calls' ? '2px solid #00a884' : '2px solid transparent',
+                      }}
+                    >
+                      CALLS
+                    </button>
+                  </div>
+                ) : null}
                 <div style={{ padding: '10px 10px 0', background: T.sidebarBg }}>
                   <div style={{ position: 'relative' }}>
                     <Search size={14} style={{ position: 'absolute', top: 11, left: 12, color: T.textMuted }} />
@@ -2023,7 +2115,26 @@ export default function AgentWhatsAppPage() {
                     ) : null}
                   </div>
                 </div>
-                <div style={{ flex: 1, minHeight: 0, overflowY: 'auto' }}>
+                <div
+                  style={{
+                    flex: 1,
+                    minHeight: 0,
+                    overflowY: 'auto',
+                    WebkitOverflowScrolling: 'touch',
+                    overscrollBehavior: 'contain',
+                    touchAction: 'pan-y',
+                  }}
+                >
+                {isMobile && mobilePrimaryTab === 'calls' ? (
+                  <div style={{ padding: 18, display: 'grid', gap: 12 }}>
+                    <div style={{ fontSize: 16, fontWeight: 700, color: T.textPrimary }}>Calls</div>
+                    <div style={{ fontSize: 13, color: T.textSecondary, lineHeight: 1.5 }}>
+                      WhatsApp calling will be implemented later. Current CRM Stringee calling remains unchanged and is available from lead and chat call actions.
+                    </div>
+                  </div>
+                ) : null}
+                {(!isMobile || mobilePrimaryTab === 'chats') ? (
+                <>
                 {displayedConversations.length === 0 && (
                   <div style={{ padding: 16, color: 'var(--text-muted)', fontSize: 13 }}>
                     {sessionState === 'connected' ? (
@@ -2065,6 +2176,7 @@ export default function AgentWhatsAppPage() {
                       className="wa-chat-row"
                       onClick={() => {
                         setSelectedJid(conversation.jid);
+                        if (isMobile) setMobilePrimaryTab('chats');
                         if (isMobile) setShowChatListOnMobile(false);
                       }}
                       style={{
@@ -2189,13 +2301,17 @@ export default function AgentWhatsAppPage() {
                     </button>
                   );
                 })}
+                </>
+                ) : null}
                 </div>
               </div>
 
               <div
                 style={{
-                  display: isMobile && showChatListOnMobile ? 'none' : 'flex',
+                  display: isMobile && (showChatListOnMobile || mobilePrimaryTab === 'calls') ? 'none' : 'flex',
                   flexDirection: 'column',
+                  height: isMobile ? undefined : undefined,
+                  flex: isMobile ? 1 : undefined,
                   minWidth: 0,
                   minHeight: 0,
                   overflow: 'hidden',
@@ -2219,7 +2335,10 @@ export default function AgentWhatsAppPage() {
                     {isMobile ? (
                       <button
                         type="button"
-                        onClick={() => setShowChatListOnMobile(true)}
+                        onClick={() => {
+                          setShowChatListOnMobile(true);
+                          setMobilePrimaryTab('chats');
+                        }}
                         style={{ border: 'none', background: 'transparent', display: 'inline-grid', placeItems: 'center', cursor: 'pointer', color: T.icon }}
                       >
                         <ArrowLeft size={18} />
@@ -2562,6 +2681,9 @@ export default function AgentWhatsAppPage() {
                     minHeight: 0,
                     padding: 14,
                     overflowY: 'auto',
+                    WebkitOverflowScrolling: 'touch',
+                    overscrollBehavior: 'contain',
+                    touchAction: 'pan-y',
                     display: 'grid',
                     gap: 10,
                     alignContent: 'start',
@@ -3295,6 +3417,9 @@ export default function AgentWhatsAppPage() {
                     background: T.panelBg,
                     borderLeft: `1px solid ${T.border}`,
                     overflowY: 'auto',
+                    WebkitOverflowScrolling: 'touch',
+                    overscrollBehavior: 'contain',
+                    touchAction: 'pan-y',
                     display: 'flex',
                     flexDirection: 'column',
                     ...(isMobile ? { position: 'absolute' as const, inset: 0, zIndex: 5 } : {}),

@@ -213,16 +213,35 @@ router.get('/', async (req: Request, res: Response, next: NextFunction) => {
     // Uses DISTINCT ON to get the latest disposition per lead, then narrows the
     // leads query to those whose latest disposition matches.
     if (callResults.length > 0) {
-      const callResultSet = new Set(callResults);
+      const normalizedCallResults = callResults.map((value) => value.trim().toLowerCase());
+      const includeFreshLeads = normalizedCallResults.includes('new lead') || normalizedCallResults.includes('newlead');
+      const callResultSet = new Set(normalizedCallResults);
       const rows = await prisma.$queryRaw<{ leadId: string; dispositionTag: string }[]>`
         SELECT DISTINCT ON ("leadId") "leadId", "dispositionTag"
         FROM "call_logs"
         ORDER BY "leadId", "calledAt" DESC
       `;
-      const matchingIds = rows
-        .filter((r) => callResultSet.has(r.dispositionTag))
-        .map((r) => r.leadId);
-      restrictLeadIds(matchingIds);
+
+      const matchingIds = new Set(
+        rows
+          .filter((r) => callResultSet.has((r.dispositionTag || '').trim().toLowerCase()))
+          .map((r) => r.leadId),
+      );
+
+      if (includeFreshLeads) {
+        const freshLeads = await prisma.lead.findMany({
+          where: {
+            ...(where as any),
+            status: 'uncontacted',
+            lastCalledAt: null,
+            callLogs: { none: {} },
+          },
+          select: { id: true },
+        });
+        freshLeads.forEach((lead) => matchingIds.add(lead.id));
+      }
+
+      restrictLeadIds(Array.from(matchingIds));
     }
 
     if (languages.length > 0) {
@@ -263,12 +282,20 @@ router.get('/', async (req: Request, res: Response, next: NextFunction) => {
       where.followUps = { some: { status: followUpStatus } };
     }
 
+    const leadOrderBy = callerRole === 'agent'
+      ? [
+          { status: 'asc' as const },
+          { lastCalledAt: { sort: 'asc' as const, nulls: 'first' as const } },
+          { createdAt: 'asc' as const },
+        ]
+      : [{ createdAt: 'desc' as const }];
+
     const [leads, total] = await Promise.all([
       prisma.lead.findMany({
         where,
         skip,
         take: parseInt(limit),
-        orderBy: { createdAt: 'desc' },
+        orderBy: leadOrderBy,
         select: {
           id: true,
           // Always select the raw phone here; agent responses are masked below.
@@ -628,10 +655,12 @@ router.put('/:id/call-result', async (req: Request, res: Response, next: NextFun
     const { dispositionTag } = z.object({
       dispositionTag: z.string().min(1).max(50),
     }).parse(req.body);
+    const requestedDisposition = dispositionTag.trim();
 
-    const [lead, tag, latestCallLog] = await Promise.all([
+    const [lead, tagExact, tagInsensitive, latestCallLog] = await Promise.all([
       prisma.lead.findFirst({ where: { id, deletedAt: null } }),
-      prisma.dispositionTag.findUnique({ where: { name: dispositionTag } }),
+      prisma.dispositionTag.findUnique({ where: { name: requestedDisposition } }),
+      prisma.dispositionTag.findFirst({ where: { name: { equals: requestedDisposition, mode: 'insensitive' } } }),
       prisma.callLog.findFirst({
         where: { leadId: id },
         orderBy: { calledAt: 'desc' },
@@ -644,23 +673,34 @@ router.put('/:id/call-result', async (req: Request, res: Response, next: NextFun
       throw new AppError(403, 'FORBIDDEN', 'This lead is not assigned to you');
     }
 
-    if (!tag) throw new AppError(400, 'INVALID_TAG', `Disposition tag "${dispositionTag}" does not exist`);
+    const resolvedTag = tagExact || tagInsensitive;
+    if (!resolvedTag) throw new AppError(400, 'INVALID_TAG', `Disposition tag "${dispositionTag}" does not exist`);
+    const canonicalDisposition = resolvedTag.name;
 
-    const updated = latestCallLog
-      ? await prisma.callLog.update({
-        where: { id: latestCallLog.id },
-        data: { dispositionTag },
-        include: { agent: { select: { id: true, name: true } } },
-      })
-      : await prisma.callLog.create({
+    const [updated] = await prisma.$transaction([
+      latestCallLog
+        ? prisma.callLog.update({
+          where: { id: latestCallLog.id },
+          data: { dispositionTag: canonicalDisposition },
+          include: { agent: { select: { id: true, name: true } } },
+        })
+        : prisma.callLog.create({
+          data: {
+            leadId: id,
+            agentId: req.user!.userId,
+            dispositionTag: canonicalDisposition,
+            durationSeconds: 0,
+          },
+          include: { agent: { select: { id: true, name: true } } },
+        }),
+      prisma.lead.update({
+        where: { id },
         data: {
-          leadId: id,
-          agentId: req.user!.userId,
-          dispositionTag,
-          durationSeconds: 0,
+          lastCalledAt: new Date(),
+          ...(lead.status === 'uncontacted' ? { status: 'contacted' } : {}),
         },
-        include: { agent: { select: { id: true, name: true } } },
-      });
+      }),
+    ]);
 
     res.json({ success: true, data: updated });
   } catch (err) {

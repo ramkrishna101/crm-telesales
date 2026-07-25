@@ -1,7 +1,7 @@
 import { useState, useSyncExternalStore, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { leadsService, callsService, tagsService } from '../../services/crm.service';
+import { agentService, leadsService, callsService, tagsService } from '../../services/crm.service';
 import AppLayout from '../../components/layout/AppLayout';
 import { useIsMobile } from '../../hooks/useIsMobile';
 import DateRangeFilter, { computeRange, type DateRangePreset, type DateRangeValue } from '../../components/ui/DateRangeFilter';
@@ -445,6 +445,23 @@ export default function AgentLeadsPage() {
     }
   }, [filteredLeads, isMobile, selectedLeadId]);
 
+  useEffect(() => {
+    const handleQueueNextLead = (event: Event) => {
+      const customEvent = event as CustomEvent<{ leadId?: string | null }>;
+      const nextLeadId = customEvent.detail?.leadId || null;
+      if (nextLeadId) {
+        setSelectedLeadId(nextLeadId);
+        return;
+      }
+
+      // If there is no computed next lead, allow list fallback logic to choose first available.
+      setSelectedLeadId(null);
+    };
+
+    window.addEventListener('agent:queue-next-lead', handleQueueNextLead as EventListener);
+    return () => window.removeEventListener('agent:queue-next-lead', handleQueueNextLead as EventListener);
+  }, []);
+
   const handleCall = async (lead: Lead) => {
     try {
       await stringeeService.startCall(lead.id, lead.name || 'Lead');
@@ -757,6 +774,7 @@ export default function AgentLeadsPage() {
           {isModalOpen && selectedLeadId && (
             <LeadDetailsModal
               leadId={selectedLeadId}
+              onLeadChange={setSelectedLeadId}
               onClose={() => {
                 setIsModalOpen(false);
                 setSelectedLeadId(selectedLeadId);
@@ -1294,6 +1312,7 @@ export default function AgentLeadsPage() {
       {isModalOpen && selectedLeadId && (
         <LeadDetailsModal 
           leadId={selectedLeadId} 
+          onLeadChange={setSelectedLeadId}
           onClose={() => {
             setIsModalOpen(false);
             setSelectedLeadId(null);
@@ -1314,13 +1333,29 @@ export default function AgentLeadsPage() {
   );
 }
 
-function LeadDetailsModal({ leadId, onClose }: { leadId: string, onClose: () => void }) {
+function LeadDetailsModal({ leadId, onClose, onLeadChange }: { leadId: string, onClose: () => void, onLeadChange?: (nextLeadId: string) => void }) {
   const qc = useQueryClient();
   const [newComment, setNewComment] = useState('');
   const [activeTab, setActiveTab] = useState<'history' | 'comments'>('comments');
   const [statusDraft, setStatusDraft] = useState('');
   const [callResultDraft, setCallResultDraft] = useState('');
   const [languageDraft, setLanguageDraft] = useState('');
+
+  const moveToNextLead = async () => {
+    try {
+      const campaignId = lead?.campaign?.id || lead?.campaignId;
+      const response = await agentService.nextLead(campaignId, leadId);
+      const nextLeadId = response?.data?.data?.lead?.id as string | undefined;
+
+      if (nextLeadId && nextLeadId !== leadId) {
+        onLeadChange?.(nextLeadId);
+      } else {
+        toast('No more leads in queue');
+      }
+    } catch {
+      toast.error('Call result saved, but could not load next lead');
+    }
+  };
 
   const copyPhone = async (leadIdToCopy: string) => {
     try {
@@ -1404,8 +1439,9 @@ function LeadDetailsModal({ leadId, onClose }: { leadId: string, onClose: () => 
       });
       return { previous };
     },
-    onSuccess: () => {
+    onSuccess: async () => {
       toast.success('Call result updated');
+      await moveToNextLead();
     },
     onError: (error: any, _vars, ctx: any) => {
       if (ctx?.previous) qc.setQueryData(['lead-details', leadId], ctx.previous);

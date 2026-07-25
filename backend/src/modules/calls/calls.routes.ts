@@ -39,14 +39,16 @@ router.post('/', async (req: Request, res: Response, next: NextFunction) => {
   try {
     const body = logCallSchema.parse(req.body);
     const agentId = req.user!.userId;
+    const requestedDisposition = body.dispositionTag.trim();
     const parsedLanguageMatch = body.notes?.match(/^Language:\s*([^|]+?)(?:\s*\|\s*(.*))?$/i);
     const resolvedLanguage = body.language || parsedLanguageMatch?.[1]?.trim() || undefined;
 
     // Verify the lead is assigned to this agent (or admin/supervisor can log too)
     // and the disposition tag exists — run both lookups in parallel.
-    const [lead, tagExists] = await Promise.all([
+    const [lead, tagExact, tagInsensitive] = await Promise.all([
       prisma.lead.findUnique({ where: { id: body.leadId } }),
-      prisma.dispositionTag.findUnique({ where: { name: body.dispositionTag } }),
+      prisma.dispositionTag.findUnique({ where: { name: requestedDisposition } }),
+      prisma.dispositionTag.findFirst({ where: { name: { equals: requestedDisposition, mode: 'insensitive' } } }),
     ]);
     if (!lead) throw new AppError(404, 'LEAD_NOT_FOUND', 'Lead not found');
 
@@ -54,7 +56,9 @@ router.post('/', async (req: Request, res: Response, next: NextFunction) => {
       throw new AppError(403, 'FORBIDDEN', 'This lead is not assigned to you');
     }
 
-    if (!tagExists) throw new AppError(400, 'INVALID_TAG', `Disposition tag "${body.dispositionTag}" does not exist`);
+    const resolvedTag = tagExact || tagInsensitive;
+    if (!resolvedTag) throw new AppError(400, 'INVALID_TAG', `Disposition tag "${body.dispositionTag}" does not exist`);
+    const dispositionTag = resolvedTag.name;
 
     if (!body.isManual && body.durationSeconds === 0 && !body.telephonyRef) {
       throw new AppError(
@@ -75,7 +79,7 @@ router.post('/', async (req: Request, res: Response, next: NextFunction) => {
     } else if (lead.status === 'uncontacted') {
       nextStatus = 'contacted';
     }
-    if (body.dispositionTag === 'DND') {
+    if (dispositionTag.toLowerCase() === 'dnd') {
       nextStatus = 'dnd';
     }
 
@@ -85,7 +89,7 @@ router.post('/', async (req: Request, res: Response, next: NextFunction) => {
         data: {
           leadId: body.leadId,
           agentId,
-          dispositionTag: body.dispositionTag,
+          dispositionTag,
           durationSeconds: body.durationSeconds,
           totalDurationSeconds: body.totalDurationSeconds ?? body.durationSeconds,
           isManual: body.isManual,

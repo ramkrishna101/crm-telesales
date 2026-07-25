@@ -4,7 +4,7 @@ import toast from 'react-hot-toast';
 import { Check, ChevronDown, Phone, X } from 'lucide-react';
 import { useIsMobile } from '../../hooks/useIsMobile';
 import { stringeeService } from '../../services/stringee.service';
-import { tagsService, callsService, followUpsService, leadsService } from '../../services/crm.service';
+import { agentService, tagsService, callsService, followUpsService, leadsService } from '../../services/crm.service';
 
 const STATUS_LABELS: Record<string, { label: string; bg: string; fg: string }> = {
   uncontacted:    { label: 'New Lead',       bg: '#eef2f7', fg: '#475569' },
@@ -120,10 +120,17 @@ export default function PostCallOutcomeModal() {
   const [followupDate, setFollowupDate] = useState('');
   const [followupTime, setFollowupTime] = useState('');
   const [description, setDescription] = useState('');
+  const initializedCallKeyRef = useRef<string | null>(null);
 
-  // Reset form when a new lastCall arrives
+  // Reset form once per completed call so in-progress dropdown selections
+  // are not wiped out by background lead/query refreshes.
+  const callInitKey = state.lastCall
+    ? `${state.lastCall.leadId}:${state.lastCall.startedAt}:${state.lastCall.endedAt || ''}:${state.lastCall.telephonyRef || ''}`
+    : null;
+
   useEffect(() => {
-    if (state.lastCall) {
+    if (state.lastCall && callInitKey && initializedCallKeyRef.current !== callInitKey) {
+      initializedCallKeyRef.current = callInitKey;
       setDispositionTag('');
       setLanguage(previousLanguage);
       setFollowupStatus(currentFollowupStatus);
@@ -131,7 +138,18 @@ export default function PostCallOutcomeModal() {
       setFollowupTime('');
       setDescription('');
     }
-  }, [currentFollowupStatus, previousLanguage, state.lastCall?.endedAt, state.lastCall]);
+  }, [callInitKey, currentFollowupStatus, previousLanguage, state.lastCall]);
+
+  // If lead defaults arrive after modal opens, only backfill blank fields.
+  useEffect(() => {
+    if (!visible) return;
+    if (previousLanguage) {
+      setLanguage((current) => (current ? current : previousLanguage));
+    }
+    if (currentFollowupStatus) {
+      setFollowupStatus((current) => (current ? current : currentFollowupStatus));
+    }
+  }, [currentFollowupStatus, previousLanguage, visible]);
 
   // Fetch the server-side CDR from Stringee. The CDR is eventually consistent
   // (usually written within ~3-5s of hangup), so we poll until duration > 0.
@@ -208,9 +226,20 @@ export default function PostCallOutcomeModal() {
         }
       }
 
+      let nextLeadId: string | null = null;
+
+      try {
+        const campaignId = liveLead?.campaignId || liveLead?.campaign?.id;
+        const nextLeadResponse = await agentService.nextLead(campaignId, state.lastCall.leadId);
+        nextLeadId = nextLeadResponse?.data?.data?.lead?.id || null;
+      } catch {
+        // Non-blocking: call log is already saved.
+      }
+
       return {
         reminderScheduled: !!scheduledAt && !reminderError,
         reminderError,
+        nextLeadId,
       };
     },
     onSuccess: (result) => {
@@ -227,6 +256,12 @@ export default function PostCallOutcomeModal() {
       qc.invalidateQueries({ queryKey: ['agent-dashboard'] });
       qc.invalidateQueries({ queryKey: ['lead-history'] });
       qc.invalidateQueries({ queryKey: ['lead-details'] });
+
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent(new CustomEvent('agent:queue-next-lead', {
+          detail: { leadId: result?.nextLeadId || null },
+        }));
+      }
     },
     onError: (err) => {
       toast.error(err instanceof Error ? err.message : 'Failed to log call', { duration: 6000 });
